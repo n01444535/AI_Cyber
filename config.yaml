@@ -19,7 +19,7 @@ scanner:
 # Packet analyzer settings
 packet_analyzer:
   max_packet_count: 100000
-  live_capture_interface: "en0"
+  live_capture_interface: "eth0"
   capture_timeout_seconds: 60
   flow_timeout_seconds: 120
 

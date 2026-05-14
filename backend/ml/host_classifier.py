@@ -14,7 +14,6 @@ from backend.constants import (
     TEST_SPLIT_RATIO,
 )
 
-
 CLASSIFIER_FEATURE_COLUMNS = [
     "open_port_count",
     "high_risk_port_count",
@@ -62,8 +61,7 @@ class SuspiciousHostClassifier:
 
         if split_ratio > 0:
             train_features, test_features, train_labels, test_labels = train_test_split(
-                feature_matrix, encoded_labels,
-                test_size=split_ratio, random_state=42
+                feature_matrix, encoded_labels, test_size=split_ratio, random_state=42
             )
         else:
             train_features = feature_matrix
@@ -80,10 +78,12 @@ class SuspiciousHostClassifier:
         self._random_forest_model.fit(train_features, train_labels)
         self._is_trained = True
 
-        self._feature_importances = dict(zip(
-            CLASSIFIER_FEATURE_COLUMNS,
-            self._random_forest_model.feature_importances_.tolist(),
-        ))
+        self._feature_importances = dict(
+            zip(
+                CLASSIFIER_FEATURE_COLUMNS,
+                self._random_forest_model.feature_importances_.tolist(),
+            )
+        )
 
         test_accuracy = self._random_forest_model.score(test_features, test_labels)
         return {
@@ -107,22 +107,26 @@ class SuspiciousHostClassifier:
         classification_results: list[dict] = []
         for index, feature_dict in enumerate(host_feature_dicts):
             max_probability = float(class_probabilities[index].max())
-            classification_results.append({
-                "ip_address": feature_dict.get("ip_address", "unknown"),
-                "predicted_risk_class": decoded_labels[index],
-                "confidence_score": max_probability,
-                "class_probabilities": dict(zip(
-                    self._label_encoder.classes_.tolist(),
-                    class_probabilities[index].tolist(),
-                )),
-            })
+            classification_results.append(
+                {
+                    "ip_address": feature_dict.get("ip_address", "unknown"),
+                    "predicted_risk_class": decoded_labels[index],
+                    "confidence_score": max_probability,
+                    "class_probabilities": dict(
+                        zip(
+                            self._label_encoder.classes_.tolist(),
+                            class_probabilities[index].tolist(),
+                        )
+                    ),
+                }
+            )
 
         return classification_results
 
     def get_feature_importances(self) -> dict[str, float]:
-        return dict(sorted(
-            self._feature_importances.items(), key=lambda item: item[1], reverse=True
-        ))
+        return dict(
+            sorted(self._feature_importances.items(), key=lambda item: item[1], reverse=True)
+        )
 
     def save_model(self, model_save_path: str) -> None:
         if not self._is_trained:
@@ -130,11 +134,14 @@ class SuspiciousHostClassifier:
         Path(model_save_path).mkdir(parents=True, exist_ok=True)
         model_file_path = os.path.join(model_save_path, "host_classifier.pkl")
         with open(model_file_path, "wb") as model_file:
-            pickle.dump({
-                "model": self._random_forest_model,
-                "label_encoder": self._label_encoder,
-                "feature_importances": self._feature_importances,
-            }, model_file)
+            pickle.dump(
+                {
+                    "model": self._random_forest_model,
+                    "label_encoder": self._label_encoder,
+                    "feature_importances": self._feature_importances,
+                },
+                model_file,
+            )
 
     def load_model(self, model_save_path: str) -> bool:
         model_file_path = os.path.join(model_save_path, "host_classifier.pkl")
@@ -161,12 +168,14 @@ def _build_heuristic_classifications(host_feature_dicts: list[dict]) -> list[dic
     classification_results: list[dict] = []
     for feature_dict in host_feature_dicts:
         risk_class = _calculate_heuristic_risk_class(feature_dict)
-        classification_results.append({
-            "ip_address": feature_dict.get("ip_address", "unknown"),
-            "predicted_risk_class": risk_class,
-            "confidence_score": 0.60,
-            "class_probabilities": {},
-        })
+        classification_results.append(
+            {
+                "ip_address": feature_dict.get("ip_address", "unknown"),
+                "predicted_risk_class": risk_class,
+                "confidence_score": 0.60,
+                "class_probabilities": {},
+            }
+        )
     return classification_results
 
 

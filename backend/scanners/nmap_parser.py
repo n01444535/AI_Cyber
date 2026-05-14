@@ -148,34 +148,42 @@ def _extract_nse_script_outputs(port_element: ET.Element) -> list[dict]:
 
 def convert_hosts_to_feature_dicts(scanned_hosts: list[ScannedHostRecord]) -> list[dict]:
     from backend.constants import (
-        HIGH_RISK_PORTS, CRITICAL_RISK_PORTS, REMOTE_ACCESS_PORTS,
-        DATABASE_PORTS, FILESHARE_PORTS, WEB_PORTS, MAIL_PORTS,
-        CLEARTEXT_PORTS, ADMIN_PORTS,
+        HIGH_RISK_PORTS,
+        CRITICAL_RISK_PORTS,
+        REMOTE_ACCESS_PORTS,
+        DATABASE_PORTS,
+        FILESHARE_PORTS,
+        WEB_PORTS,
+        MAIL_PORTS,
+        CLEARTEXT_PORTS,
+        ADMIN_PORTS,
     )
 
     feature_records = []
     for host in scanned_hosts:
         port_numbers = {port.port_number for port in host.open_ports}
-        feature_records.append({
-            "ip_address": host.ip_address,
-            "hostname": host.hostname,
-            "open_port_count": len(port_numbers),
-            "high_risk_port_count": len(port_numbers & HIGH_RISK_PORTS),
-            "critical_port_count": len(port_numbers & CRITICAL_RISK_PORTS),
-            "remote_access_port_count": len(port_numbers & REMOTE_ACCESS_PORTS),
-            "database_port_count": len(port_numbers & DATABASE_PORTS),
-            "fileshare_port_count": len(port_numbers & FILESHARE_PORTS),
-            "web_port_count": len(port_numbers & WEB_PORTS),
-            "mail_port_count": len(port_numbers & MAIL_PORTS),
-            "cleartext_port_count": len(port_numbers & CLEARTEXT_PORTS),
-            "admin_port_count": len(port_numbers & ADMIN_PORTS),
-            "has_smb": int(445 in port_numbers),
-            "has_rdp": int(3389 in port_numbers),
-            "has_ssh": int(22 in port_numbers),
-            "has_telnet": int(23 in port_numbers),
-            "has_ftp": int(21 in port_numbers),
-            "has_rdp_vnc": int(bool({3389, 5900} & port_numbers)),
-            "has_db_exposed": int(bool(DATABASE_PORTS & port_numbers)),
-            "has_docker_api": int(bool({2375, 2376} & port_numbers)),
-        })
+        feature_records.append(
+            {
+                "ip_address": host.ip_address,
+                "hostname": host.hostname,
+                "open_port_count": len(port_numbers),
+                "high_risk_port_count": len(port_numbers & HIGH_RISK_PORTS),
+                "critical_port_count": len(port_numbers & CRITICAL_RISK_PORTS),
+                "remote_access_port_count": len(port_numbers & REMOTE_ACCESS_PORTS),
+                "database_port_count": len(port_numbers & DATABASE_PORTS),
+                "fileshare_port_count": len(port_numbers & FILESHARE_PORTS),
+                "web_port_count": len(port_numbers & WEB_PORTS),
+                "mail_port_count": len(port_numbers & MAIL_PORTS),
+                "cleartext_port_count": len(port_numbers & CLEARTEXT_PORTS),
+                "admin_port_count": len(port_numbers & ADMIN_PORTS),
+                "has_smb": int(445 in port_numbers),
+                "has_rdp": int(3389 in port_numbers),
+                "has_ssh": int(22 in port_numbers),
+                "has_telnet": int(23 in port_numbers),
+                "has_ftp": int(21 in port_numbers),
+                "has_rdp_vnc": int(bool({3389, 5900} & port_numbers)),
+                "has_db_exposed": int(bool(DATABASE_PORTS & port_numbers)),
+                "has_docker_api": int(bool({2375, 2376} & port_numbers)),
+            }
+        )
     return feature_records

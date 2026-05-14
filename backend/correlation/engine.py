@@ -1,11 +1,8 @@
 import uuid
 from collections import defaultdict
-from datetime import datetime, timezone, timedelta
 
 from backend.constants import (
-    BEACONING_INTERVAL_VARIANCE_MAX,
     C2_BEACONING_STORY_SCORE,
-    CORRELATION_TIME_WINDOW_MINUTES,
     EXFIL_STORY_SCORE,
     LATERAL_MOVEMENT_STORY_SCORE,
     MIN_EVENTS_FOR_STORY,
@@ -61,7 +58,9 @@ def _detect_attack_patterns_for_ip(
 
     alert_categories = {alert.threat_category for alert in ip_alerts}
 
-    lateral_movement_story = _try_build_lateral_movement_story(source_ip, ip_alerts, alert_categories)
+    lateral_movement_story = _try_build_lateral_movement_story(
+        source_ip, ip_alerts, alert_categories
+    )
     if lateral_movement_story:
         detected_stories.append(lateral_movement_story)
 
@@ -97,8 +96,10 @@ def _try_build_lateral_movement_story(
         return None
 
     supporting_alerts = [
-        a for a in ip_alerts
-        if a.threat_category in required_for_lateral or a.threat_category == ThreatCategory.BRUTE_FORCE
+        a
+        for a in ip_alerts
+        if a.threat_category in required_for_lateral
+        or a.threat_category == ThreatCategory.BRUTE_FORCE
     ]
 
     timeline_events = _build_timeline_events_from_alerts(supporting_alerts)
@@ -114,7 +115,9 @@ def _try_build_lateral_movement_story(
         risk_level=RiskLevel.CRITICAL,
         timeline_events=timeline_events,
         mitre_tactics=[MITRE_TACTIC_RECON, MITRE_TACTIC_LATERAL_MOVE],
-        mitre_techniques=list({a.mitre_technique_id for a in supporting_alerts if a.mitre_technique_id}),
+        mitre_techniques=list(
+            {a.mitre_technique_id for a in supporting_alerts if a.mitre_technique_id}
+        ),
         supporting_alert_ids=[a.alert_id for a in supporting_alerts],
         ai_explanation=narrative,
         first_seen=min((a.timestamp for a in supporting_alerts if a.timestamp), default=""),
@@ -128,13 +131,13 @@ def _try_build_c2_beaconing_story(
     alert_categories: set[ThreatCategory],
 ) -> CorrelatedAttackStory | None:
     has_beaconing = ThreatCategory.BEACONING in alert_categories
-    has_suspicious_outbound = ThreatCategory.SUSPICIOUS_OUTBOUND in alert_categories
 
     if not has_beaconing:
         return None
 
     supporting_alerts = [
-        a for a in ip_alerts
+        a
+        for a in ip_alerts
         if a.threat_category in {ThreatCategory.BEACONING, ThreatCategory.SUSPICIOUS_OUTBOUND}
     ]
 
@@ -157,7 +160,9 @@ def _try_build_c2_beaconing_story(
         risk_level=RiskLevel.CRITICAL,
         timeline_events=timeline_events,
         mitre_tactics=[MITRE_TACTIC_C2],
-        mitre_techniques=list({a.mitre_technique_id for a in supporting_alerts if a.mitre_technique_id}),
+        mitre_techniques=list(
+            {a.mitre_technique_id for a in supporting_alerts if a.mitre_technique_id}
+        ),
         supporting_alert_ids=[a.alert_id for a in supporting_alerts],
         ai_explanation=narrative,
         first_seen=min((a.timestamp for a in supporting_alerts if a.timestamp), default=""),
@@ -178,8 +183,10 @@ def _try_build_exfiltration_story(
         return None
 
     supporting_alerts = [
-        a for a in ip_alerts
-        if a.threat_category in {
+        a
+        for a in ip_alerts
+        if a.threat_category
+        in {
             ThreatCategory.EXFILTRATION,
             ThreatCategory.DNS_TUNNELING,
             ThreatCategory.BEACONING,
@@ -212,7 +219,9 @@ def _try_build_exfiltration_story(
         risk_level=RiskLevel.CRITICAL,
         timeline_events=timeline_events,
         mitre_tactics=[MITRE_TACTIC_EXFILTRATION, MITRE_TACTIC_C2],
-        mitre_techniques=list({a.mitre_technique_id for a in supporting_alerts if a.mitre_technique_id}),
+        mitre_techniques=list(
+            {a.mitre_technique_id for a in supporting_alerts if a.mitre_technique_id}
+        ),
         supporting_alert_ids=[a.alert_id for a in supporting_alerts],
         ai_explanation=narrative,
         first_seen=min((a.timestamp for a in supporting_alerts if a.timestamp), default=""),
@@ -254,7 +263,9 @@ def _try_build_reconnaissance_story(
         risk_level=RiskLevel.HIGH,
         timeline_events=timeline_events,
         mitre_tactics=[MITRE_TACTIC_RECON],
-        mitre_techniques=list({a.mitre_technique_id for a in supporting_alerts if a.mitre_technique_id}),
+        mitre_techniques=list(
+            {a.mitre_technique_id for a in supporting_alerts if a.mitre_technique_id}
+        ),
         supporting_alert_ids=[a.alert_id for a in supporting_alerts],
         ai_explanation=narrative,
         first_seen=min((a.timestamp for a in supporting_alerts if a.timestamp), default=""),
@@ -268,14 +279,16 @@ def _detect_cross_ip_patterns(
     cross_stories: list[CorrelatedAttackStory] = []
 
     scan_alerts = [a for a in threat_alerts if a.threat_category == ThreatCategory.PORT_SCAN]
-    lateral_alerts = [a for a in threat_alerts if a.threat_category == ThreatCategory.LATERAL_MOVEMENT]
+    lateral_alerts = [
+        a for a in threat_alerts if a.threat_category == ThreatCategory.LATERAL_MOVEMENT
+    ]
     exfil_alerts = [a for a in threat_alerts if a.threat_category == ThreatCategory.EXFILTRATION]
     beacon_alerts = [a for a in threat_alerts if a.threat_category == ThreatCategory.BEACONING]
 
     if scan_alerts and lateral_alerts and (exfil_alerts or beacon_alerts):
-        all_involved_ips = list({
-            a.source_ip for a in scan_alerts + lateral_alerts + exfil_alerts + beacon_alerts
-        })
+        all_involved_ips = list(
+            {a.source_ip for a in scan_alerts + lateral_alerts + exfil_alerts + beacon_alerts}
+        )
         supporting_alerts = scan_alerts + lateral_alerts + exfil_alerts + beacon_alerts
         timeline_events = _build_timeline_events_from_alerts(supporting_alerts)
 
@@ -287,21 +300,29 @@ def _detect_cross_ip_patterns(
             f"Immediate incident response is required."
         )
 
-        cross_stories.append(CorrelatedAttackStory(
-            story_id=str(uuid.uuid4())[:8],
-            involved_ip_addresses=all_involved_ips,
-            attack_narrative=narrative,
-            overall_risk_score=95.0,
-            risk_level=RiskLevel.CRITICAL,
-            timeline_events=timeline_events,
-            mitre_tactics=[MITRE_TACTIC_RECON, MITRE_TACTIC_LATERAL_MOVE,
-                           MITRE_TACTIC_EXFILTRATION, MITRE_TACTIC_C2],
-            mitre_techniques=list({a.mitre_technique_id for a in supporting_alerts if a.mitre_technique_id}),
-            supporting_alert_ids=[a.alert_id for a in supporting_alerts],
-            ai_explanation=narrative,
-            first_seen=min((a.timestamp for a in supporting_alerts if a.timestamp), default=""),
-            last_seen=max((a.timestamp for a in supporting_alerts if a.timestamp), default=""),
-        ))
+        cross_stories.append(
+            CorrelatedAttackStory(
+                story_id=str(uuid.uuid4())[:8],
+                involved_ip_addresses=all_involved_ips,
+                attack_narrative=narrative,
+                overall_risk_score=95.0,
+                risk_level=RiskLevel.CRITICAL,
+                timeline_events=timeline_events,
+                mitre_tactics=[
+                    MITRE_TACTIC_RECON,
+                    MITRE_TACTIC_LATERAL_MOVE,
+                    MITRE_TACTIC_EXFILTRATION,
+                    MITRE_TACTIC_C2,
+                ],
+                mitre_techniques=list(
+                    {a.mitre_technique_id for a in supporting_alerts if a.mitre_technique_id}
+                ),
+                supporting_alert_ids=[a.alert_id for a in supporting_alerts],
+                ai_explanation=narrative,
+                first_seen=min((a.timestamp for a in supporting_alerts if a.timestamp), default=""),
+                last_seen=max((a.timestamp for a in supporting_alerts if a.timestamp), default=""),
+            )
+        )
 
     return cross_stories
 
@@ -345,11 +366,17 @@ def _compose_lateral_movement_narrative(
     if ThreatCategory.PORT_SCAN in alert_categories:
         technique_descriptions.append("active port scanning to map network services")
     if ThreatCategory.SMB_ENUM in alert_categories:
-        technique_descriptions.append("SMB enumeration to discover shared resources and user accounts")
+        technique_descriptions.append(
+            "SMB enumeration to discover shared resources and user accounts"
+        )
     if ThreatCategory.BRUTE_FORCE in alert_categories:
-        technique_descriptions.append("brute-force credential attacks against remote access services")
+        technique_descriptions.append(
+            "brute-force credential attacks against remote access services"
+        )
     if ThreatCategory.LATERAL_MOVEMENT in alert_categories:
-        technique_descriptions.append("lateral movement to multiple internal hosts via remote protocols")
+        technique_descriptions.append(
+            "lateral movement to multiple internal hosts via remote protocols"
+        )
 
     techniques_string = ", ".join(technique_descriptions)
     return (

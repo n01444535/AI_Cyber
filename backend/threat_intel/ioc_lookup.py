@@ -13,25 +13,24 @@ from backend.constants import (
 )
 from backend.models import IOCLookupResult
 
-
-VIRUSTOTAL_IP_URL   = "https://www.virustotal.com/api/v3/ip_addresses/{indicator}"
+VIRUSTOTAL_IP_URL = "https://www.virustotal.com/api/v3/ip_addresses/{indicator}"
 VIRUSTOTAL_DOMAIN_URL = "https://www.virustotal.com/api/v3/domains/{indicator}"
-ABUSEIPDB_URL       = "https://api.abuseipdb.com/api/v2/check"
-OTX_IP_URL          = "https://otx.alienvault.com/api/v1/indicators/IPv4/{indicator}/general"
-OTX_DOMAIN_URL      = "https://otx.alienvault.com/api/v1/indicators/domain/{indicator}/general"
-MITRE_CVE_URL       = "https://services.nvd.nist.gov/rest/json/cves/2.0"
+ABUSEIPDB_URL = "https://api.abuseipdb.com/api/v2/check"
+OTX_IP_URL = "https://otx.alienvault.com/api/v1/indicators/IPv4/{indicator}/general"
+OTX_DOMAIN_URL = "https://otx.alienvault.com/api/v1/indicators/domain/{indicator}/general"
+MITRE_CVE_URL = "https://services.nvd.nist.gov/rest/json/cves/2.0"
 
 REQUEST_TIMEOUT_SECONDS = 10
-CACHE_FILE_NAME         = ".ioc_cache.json"
+CACHE_FILE_NAME = ".ioc_cache.json"
 
 
 class IOCLookupService:
     def __init__(self, cache_directory: str = ".") -> None:
         self._virustotal_api_key: str = os.getenv("VIRUSTOTAL_API_KEY", "")
-        self._abuseipdb_api_key: str  = os.getenv("ABUSEIPDB_API_KEY", "")
-        self._otx_api_key: str        = os.getenv("OTX_API_KEY", "")
-        self._cache_file_path: str    = os.path.join(cache_directory, CACHE_FILE_NAME)
-        self._in_memory_cache: dict   = self._load_cache_from_disk()
+        self._abuseipdb_api_key: str = os.getenv("ABUSEIPDB_API_KEY", "")
+        self._otx_api_key: str = os.getenv("OTX_API_KEY", "")
+        self._cache_file_path: str = os.path.join(cache_directory, CACHE_FILE_NAME)
+        self._in_memory_cache: dict = self._load_cache_from_disk()
 
     def lookup_ip(self, ip_address: str) -> IOCLookupResult:
         cached_result = self._get_from_cache(ip_address)
@@ -39,13 +38,13 @@ class IOCLookupService:
             return cached_result
 
         virustotal_result = self._query_virustotal_ip(ip_address)
-        abuseipdb_result  = self._query_abuseipdb(ip_address)
-        otx_result        = self._query_otx_ip(ip_address)
+        abuseipdb_result = self._query_abuseipdb(ip_address)
+        otx_result = self._query_otx_ip(ip_address)
 
-        vt_positives   = virustotal_result.get("malicious_count", 0)
-        vt_total       = virustotal_result.get("total_scanners", 0)
-        abuse_score    = abuseipdb_result.get("confidence_score", 0)
-        otx_pulses     = otx_result.get("pulse_count", 0)
+        vt_positives = virustotal_result.get("malicious_count", 0)
+        vt_total = virustotal_result.get("total_scanners", 0)
+        abuse_score = abuseipdb_result.get("confidence_score", 0)
+        otx_pulses = otx_result.get("pulse_count", 0)
 
         is_malicious = (
             vt_positives >= VIRUSTOTAL_MALICIOUS_MIN_VOTES
@@ -74,16 +73,13 @@ class IOCLookupService:
             return cached_result
 
         virustotal_result = self._query_virustotal_domain(domain_name)
-        otx_result        = self._query_otx_domain(domain_name)
+        otx_result = self._query_otx_domain(domain_name)
 
         vt_positives = virustotal_result.get("malicious_count", 0)
-        vt_total     = virustotal_result.get("total_scanners", 0)
-        otx_pulses   = otx_result.get("pulse_count", 0)
+        vt_total = virustotal_result.get("total_scanners", 0)
+        otx_pulses = otx_result.get("pulse_count", 0)
 
-        is_malicious = (
-            vt_positives >= VIRUSTOTAL_MALICIOUS_MIN_VOTES
-            or otx_pulses >= 1
-        )
+        is_malicious = vt_positives >= VIRUSTOTAL_MALICIOUS_MIN_VOTES or otx_pulses >= 1
 
         lookup_result = IOCLookupResult(
             indicator=domain_name,
@@ -122,7 +118,9 @@ class IOCLookupService:
             if response.status_code != 200:
                 return {"error": f"VirusTotal HTTP {response.status_code}"}
             response_data = response.json()
-            stats = response_data.get("data", {}).get("attributes", {}).get("last_analysis_stats", {})
+            stats = (
+                response_data.get("data", {}).get("attributes", {}).get("last_analysis_stats", {})
+            )
             return {
                 "malicious_count": stats.get("malicious", 0),
                 "total_scanners": sum(stats.values()),
@@ -142,7 +140,9 @@ class IOCLookupService:
             if response.status_code != 200:
                 return {"error": f"VirusTotal HTTP {response.status_code}"}
             response_data = response.json()
-            stats = response_data.get("data", {}).get("attributes", {}).get("last_analysis_stats", {})
+            stats = (
+                response_data.get("data", {}).get("attributes", {}).get("last_analysis_stats", {})
+            )
             return {
                 "malicious_count": stats.get("malicious", 0),
                 "total_scanners": sum(stats.values()),
@@ -248,8 +248,18 @@ class IOCLookupService:
 
 
 def extract_unique_external_ips(network_flow_features: list[dict]) -> list[str]:
-    private_prefixes = ("10.", "172.16.", "172.17.", "172.18.", "172.19.",
-                        "172.20.", "192.168.", "127.", "0.", "169.254.")
+    private_prefixes = (
+        "10.",
+        "172.16.",
+        "172.17.",
+        "172.18.",
+        "172.19.",
+        "172.20.",
+        "192.168.",
+        "127.",
+        "0.",
+        "169.254.",
+    )
     unique_ips: set[str] = set()
     for feature_dict in network_flow_features:
         ip_address = feature_dict.get("ip_address", "")

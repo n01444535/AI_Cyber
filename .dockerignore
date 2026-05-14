@@ -1,0 +1,12 @@
+__pycache__/
+*.pyc
+*.pyo
+MyEnv/
+venv/
+.venv/
+.env
+*.db
+reports/
+models/
+.git/
+.gitignore

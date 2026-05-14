@@ -4,27 +4,28 @@ from typing import Optional
 
 
 class RiskLevel(str, Enum):
-    LOW      = "Low"
-    MEDIUM   = "Medium"
-    HIGH     = "High"
+    LOW = "Low"
+    MEDIUM = "Medium"
+    HIGH = "High"
     CRITICAL = "Critical"
 
 
 class ThreatCategory(str, Enum):
-    PORT_SCAN        = "Port Scan"
-    BRUTE_FORCE      = "Brute Force"
+    PORT_SCAN = "Port Scan"
+    BRUTE_FORCE = "Brute Force"
     LATERAL_MOVEMENT = "Lateral Movement"
-    BEACONING        = "Beaconing / C2"
-    DNS_TUNNELING    = "DNS Tunneling"
-    EXFILTRATION     = "Data Exfiltration"
-    SMB_ENUM         = "SMB Enumeration"
-    RECON            = "Reconnaissance"
-    ANOMALY          = "ML Anomaly"
+    BEACONING = "Beaconing / C2"
+    DNS_TUNNELING = "DNS Tunneling"
+    EXFILTRATION = "Data Exfiltration"
+    SMB_ENUM = "SMB Enumeration"
+    RECON = "Reconnaissance"
+    ANOMALY = "ML Anomaly"
     SUSPICIOUS_OUTBOUND = "Suspicious Outbound"
-    KNOWN_MALICIOUS  = "Known Malicious IP/Domain"
+    KNOWN_MALICIOUS = "Known Malicious IP/Domain"
 
 
 # ── Nmap scan models ───────────────────────────────────────────────────────────
+
 
 @dataclass
 class PortRecord:
@@ -52,6 +53,7 @@ class ScannedHostRecord:
 
 
 # ── Packet / traffic models ────────────────────────────────────────────────────
+
 
 @dataclass(frozen=True)
 class ParsedPacketRecord:
@@ -110,6 +112,7 @@ class NetworkFlowRecord:
 
 # ── Threat / alert models ──────────────────────────────────────────────────────
 
+
 @dataclass
 class ThreatAlertRecord:
     alert_id: str
@@ -120,6 +123,8 @@ class ThreatAlertRecord:
     confidence_score: float
     description: str
     evidence: list[str] = field(default_factory=list)
+    possible_false_positive: list[str] = field(default_factory=list)
+    recommended_actions: list[str] = field(default_factory=list)
     mitre_technique_id: str = ""
     mitre_technique_name: str = ""
     mitre_tactic_id: str = ""
@@ -142,6 +147,7 @@ class AttackTimelineEvent:
 
 
 # ── Host risk models ───────────────────────────────────────────────────────────
+
 
 @dataclass
 class IOCLookupResult:
@@ -175,6 +181,7 @@ class HostRiskProfile:
 
 # ── Correlation model ──────────────────────────────────────────────────────────
 
+
 @dataclass
 class CorrelatedAttackStory:
     story_id: str
@@ -192,6 +199,7 @@ class CorrelatedAttackStory:
 
 
 # ── ML model output ────────────────────────────────────────────────────────────
+
 
 @dataclass
 class AnomalyDetectionResult:
@@ -211,6 +219,7 @@ class TrafficClusterRecord:
 
 
 # ── Scan session model ─────────────────────────────────────────────────────────
+
 
 @dataclass
 class ScanSessionResult:

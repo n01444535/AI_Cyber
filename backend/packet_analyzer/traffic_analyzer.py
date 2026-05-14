@@ -1,3 +1,4 @@
+import math
 import statistics
 import uuid
 from collections import Counter, defaultdict
@@ -5,11 +6,15 @@ from datetime import datetime, timezone
 
 from backend.constants import (
     BEACONING_INTERVAL_VARIANCE_MAX,
+    BEACONING_MIN_FLOW_BYTES,
+    BEACONING_MIN_MEAN_INTERVAL_SECONDS,
     BEACONING_MIN_OCCURRENCES,
     BRUTE_FORCE_ATTEMPT_MIN,
+    DNS_HIGH_ENTROPY_LABEL_THRESHOLD,
     DNS_QUERY_BURST_MIN,
     DNS_QUERY_TIME_WINDOW_SECONDS,
     EXFIL_BYTES_THRESHOLD,
+    EXFIL_UPLOAD_RATIO_HIGH,
     LATERAL_MOVEMENT_MIN_HOSTS,
     MITRE_TACTIC_C2,
     MITRE_TACTIC_EXFILTRATION,
@@ -23,9 +28,10 @@ from backend.constants import (
     MITRE_TECHNIQUE_SMB_LATERAL,
     PORT_SCAN_TIME_WINDOW_SECONDS,
     PORT_SCAN_UNIQUE_PORT_MIN,
-    SMB_ENUM_PACKET_MIN,
     REMOTE_ACCESS_PORTS,
+    SMB_ENUM_PACKET_MIN,
 )
+from backend.analyst.recommendations import get_false_positive_explanations, get_recommended_actions
 from backend.models import (
     NetworkFlowRecord,
     ParsedPacketRecord,
@@ -126,25 +132,31 @@ def _detect_port_scans(packet_records: list[ParsedPacketRecord]) -> list[ThreatA
         for _bucket_key, scanned_ports in time_buckets.items():
             if len(scanned_ports) >= PORT_SCAN_UNIQUE_PORT_MIN:
                 unique_port_count = len(scanned_ports)
-                scan_alerts.append(ThreatAlertRecord(
-                    alert_id=str(uuid.uuid4())[:8],
-                    source_ip=scanner_ip,
-                    destination_ip="multiple",
-                    threat_category=ThreatCategory.PORT_SCAN,
-                    risk_level=RiskLevel.HIGH if unique_port_count > 50 else RiskLevel.MEDIUM,
-                    confidence_score=min(0.95, unique_port_count / 100),
-                    description=(
-                        f"Port scan detected: {scanner_ip} probed {unique_port_count} unique ports "
-                        f"within a {PORT_SCAN_TIME_WINDOW_SECONDS}-second window."
-                    ),
-                    evidence=[f"Unique ports probed: {unique_port_count}",
-                              f"Top ports: {sorted(scanned_ports)[:10]}"],
-                    mitre_technique_id=MITRE_TECHNIQUE_PORT_SCAN,
-                    mitre_technique_name="Network Service Discovery",
-                    mitre_tactic_id=MITRE_TACTIC_RECON,
-                    mitre_tactic_name="Reconnaissance",
-                    timestamp=datetime.now(timezone.utc).isoformat(),
-                ))
+                scan_alerts.append(
+                    ThreatAlertRecord(
+                        alert_id=str(uuid.uuid4())[:8],
+                        source_ip=scanner_ip,
+                        destination_ip="multiple",
+                        threat_category=ThreatCategory.PORT_SCAN,
+                        risk_level=RiskLevel.HIGH if unique_port_count > 50 else RiskLevel.MEDIUM,
+                        confidence_score=min(0.95, unique_port_count / 100),
+                        description=(
+                            f"Port scan detected: {scanner_ip} probed {unique_port_count} unique ports "
+                            f"within a {PORT_SCAN_TIME_WINDOW_SECONDS}-second window."
+                        ),
+                        evidence=[
+                            f"Unique ports probed: {unique_port_count}",
+                            f"Top ports: {sorted(scanned_ports)[:10]}",
+                        ],
+                        possible_false_positive=get_false_positive_explanations(ThreatCategory.PORT_SCAN),
+                        recommended_actions=get_recommended_actions(ThreatCategory.PORT_SCAN),
+                        mitre_technique_id=MITRE_TECHNIQUE_PORT_SCAN,
+                        mitre_technique_name="Network Service Discovery",
+                        mitre_tactic_id=MITRE_TACTIC_RECON,
+                        mitre_tactic_name="Reconnaissance",
+                        timestamp=datetime.now(timezone.utc).isoformat(),
+                    )
+                )
 
     return scan_alerts
 
@@ -154,6 +166,9 @@ def _detect_beaconing_behavior(network_flows: list[NetworkFlowRecord]) -> list[T
     flows_by_source_dest: dict[tuple, list[NetworkFlowRecord]] = defaultdict(list)
 
     for flow in network_flows:
+        too_small = flow.byte_count < BEACONING_MIN_FLOW_BYTES
+        if too_small:
+            continue
         if flow.destination_port in {80, 443, 8080, 8443} or flow.destination_port > 1024:
             pair_key = (flow.source_ip, flow.destination_ip, flow.destination_port)
             flows_by_source_dest[pair_key].append(flow)
@@ -166,32 +181,49 @@ def _detect_beaconing_behavior(network_flows: list[NetworkFlowRecord]) -> list[T
         if len(inter_arrival_intervals) < BEACONING_MIN_OCCURRENCES - 1:
             continue
 
-        interval_coefficient_of_variation = _calculate_coefficient_of_variation(inter_arrival_intervals)
-        if interval_coefficient_of_variation < BEACONING_INTERVAL_VARIANCE_MAX:
-            mean_interval = statistics.mean(inter_arrival_intervals)
-            beacon_alerts.append(ThreatAlertRecord(
+        mean_interval = statistics.mean(inter_arrival_intervals)
+        if mean_interval < BEACONING_MIN_MEAN_INTERVAL_SECONDS:
+            continue
+
+        interval_cv = _calculate_coefficient_of_variation(inter_arrival_intervals)
+        if interval_cv >= BEACONING_INTERVAL_VARIANCE_MAX:
+            continue
+
+        flow_byte_counts = [f.byte_count for f in pair_flows]
+        byte_size_cv = _calculate_coefficient_of_variation(flow_byte_counts)
+        size_is_consistent = byte_size_cv < 0.3
+
+        base_confidence = 1.0 - interval_cv
+        confidence_multiplier = 1.1 if size_is_consistent else 0.9
+        beacon_alerts.append(
+            ThreatAlertRecord(
                 alert_id=str(uuid.uuid4())[:8],
                 source_ip=source_ip,
                 destination_ip=dest_ip,
                 threat_category=ThreatCategory.BEACONING,
                 risk_level=RiskLevel.HIGH,
-                confidence_score=min(0.95, 1.0 - interval_coefficient_of_variation),
+                confidence_score=min(0.95, base_confidence * confidence_multiplier),
                 description=(
                     f"Beaconing / C2 behavior detected: {source_ip} sends highly periodic "
                     f"traffic to {dest_ip}:{dest_port} every ~{mean_interval:.1f}s "
-                    f"(CV={interval_coefficient_of_variation:.3f})."
+                    f"(interval CV={interval_cv:.3f}, byte-size CV={byte_size_cv:.3f})."
                 ),
                 evidence=[
                     f"Connection count: {len(pair_flows)}",
                     f"Mean interval: {mean_interval:.1f}s",
-                    f"Interval CV (lower = more periodic): {interval_coefficient_of_variation:.3f}",
+                    f"Interval CV (lower = more periodic): {interval_cv:.3f}",
+                    f"Byte-size CV: {byte_size_cv:.3f}"
+                    + (" — consistent payload size, stronger C2 indicator" if size_is_consistent else ""),
                 ],
+                possible_false_positive=get_false_positive_explanations(ThreatCategory.BEACONING),
+                recommended_actions=get_recommended_actions(ThreatCategory.BEACONING),
                 mitre_technique_id=MITRE_TECHNIQUE_BEACONING,
                 mitre_technique_name="Application Layer Protocol",
                 mitre_tactic_id=MITRE_TACTIC_C2,
                 mitre_tactic_name="Command and Control",
                 timestamp=datetime.now(timezone.utc).isoformat(),
-            ))
+            )
+        )
 
     return beacon_alerts
 
@@ -237,34 +269,55 @@ def _detect_dns_tunneling(packet_records: list[ParsedPacketRecord]) -> list[Thre
             query_names = [p.dns_query_name for p in bucket_packets]
             avg_query_length = sum(len(name) for name in query_names) / len(query_names)
 
-            # Long, high-entropy subdomains indicate DNS tunneling
             long_subdomain_count = sum(1 for name in query_names if _has_long_subdomain(name))
             long_subdomain_ratio = long_subdomain_count / len(query_names)
 
-            if long_subdomain_ratio > 0.3 or avg_query_length > 60:
-                dns_alerts.append(ThreatAlertRecord(
+            high_entropy_count = sum(1 for name in query_names if _has_high_entropy_label(name))
+            high_entropy_ratio = high_entropy_count / len(query_names)
+
+            length_signal = long_subdomain_ratio > 0.3 or avg_query_length > 60
+            entropy_signal = high_entropy_ratio > 0.3
+
+            if not (length_signal or entropy_signal):
+                continue
+
+            base_confidence = 0.35
+            if long_subdomain_ratio > 0.3:
+                base_confidence += 0.20
+            if avg_query_length > 60:
+                base_confidence += 0.15
+            if entropy_signal:
+                base_confidence += 0.25
+
+            dns_alerts.append(
+                ThreatAlertRecord(
                     alert_id=str(uuid.uuid4())[:8],
                     source_ip=source_ip,
                     destination_ip="DNS resolver",
                     threat_category=ThreatCategory.DNS_TUNNELING,
                     risk_level=RiskLevel.HIGH,
-                    confidence_score=min(0.90, long_subdomain_ratio + 0.4),
+                    confidence_score=min(0.95, base_confidence),
                     description=(
                         f"DNS tunneling suspected: {source_ip} sent {len(bucket_packets)} DNS queries "
-                        f"in {DNS_QUERY_TIME_WINDOW_SECONDS}s with avg label length {avg_query_length:.0f} chars."
+                        f"in {DNS_QUERY_TIME_WINDOW_SECONDS}s — avg name length {avg_query_length:.0f} chars, "
+                        f"high-entropy label ratio {high_entropy_ratio:.0%}."
                     ),
                     evidence=[
                         f"DNS query burst count: {len(bucket_packets)}",
                         f"Average query name length: {avg_query_length:.0f} chars",
                         f"Long-subdomain ratio: {long_subdomain_ratio:.0%}",
+                        f"High-entropy label ratio: {high_entropy_ratio:.0%}",
                         f"Sample query: {query_names[0][:80]}",
                     ],
+                    possible_false_positive=get_false_positive_explanations(ThreatCategory.DNS_TUNNELING),
+                    recommended_actions=get_recommended_actions(ThreatCategory.DNS_TUNNELING),
                     mitre_technique_id=MITRE_TECHNIQUE_DNS_TUNNEL,
                     mitre_technique_name="DNS Application Layer Protocol",
                     mitre_tactic_id=MITRE_TACTIC_C2,
                     mitre_tactic_name="Command and Control",
                     timestamp=datetime.now(timezone.utc).isoformat(),
-                ))
+                )
+            )
 
     return dns_alerts
 
@@ -275,48 +328,108 @@ def _has_long_subdomain(domain_name: str) -> bool:
     return any(len(label) >= min_tunneling_label_length for label in labels)
 
 
+def _calculate_shannon_entropy(text: str) -> float:
+    if not text:
+        return 0.0
+    char_counts = Counter(text.lower())
+    text_length = len(text)
+    return -sum(
+        (count / text_length) * math.log2(count / text_length)
+        for count in char_counts.values()
+    )
+
+
+def _has_high_entropy_label(domain_name: str) -> bool:
+    labels = domain_name.split(".")
+    return any(
+        _calculate_shannon_entropy(label) >= DNS_HIGH_ENTROPY_LABEL_THRESHOLD
+        for label in labels
+        if len(label) >= 8
+    )
+
+
 def _detect_data_exfiltration(network_flows: list[NetworkFlowRecord]) -> list[ThreatAlertRecord]:
     exfil_alerts: list[ThreatAlertRecord] = []
 
+    private_prefixes = (
+        "10.",
+        "172.16.",
+        "172.17.",
+        "172.18.",
+        "172.19.",
+        "172.20.",
+        "192.168.",
+        "127.",
+    )
+
     outbound_bytes_by_source: dict[str, int] = defaultdict(int)
     outbound_flows_by_source: dict[str, list[NetworkFlowRecord]] = defaultdict(list)
-
-    private_prefixes = ("10.", "172.16.", "172.17.", "172.18.", "172.19.",
-                        "172.20.", "192.168.", "127.")
+    inbound_bytes_by_host: dict[str, int] = defaultdict(int)
 
     for flow in network_flows:
         source_is_internal = any(flow.source_ip.startswith(prefix) for prefix in private_prefixes)
-        dest_is_external = not any(flow.destination_ip.startswith(prefix) for prefix in private_prefixes)
+        dest_is_internal = any(flow.destination_ip.startswith(prefix) for prefix in private_prefixes)
 
-        if source_is_internal and dest_is_external:
+        if source_is_internal and not dest_is_internal:
             outbound_bytes_by_source[flow.source_ip] += flow.byte_count
             outbound_flows_by_source[flow.source_ip].append(flow)
+        elif not source_is_internal and dest_is_internal:
+            inbound_bytes_by_host[flow.destination_ip] += flow.byte_count
 
     for source_ip, total_outbound_bytes in outbound_bytes_by_source.items():
-        if total_outbound_bytes >= EXFIL_BYTES_THRESHOLD:
-            outbound_flow_count = len(outbound_flows_by_source[source_ip])
-            megabytes_transferred = total_outbound_bytes / 1_000_000
-            exfil_alerts.append(ThreatAlertRecord(
+        if total_outbound_bytes < EXFIL_BYTES_THRESHOLD:
+            continue
+
+        outbound_flows = outbound_flows_by_source[source_ip]
+        outbound_flow_count = len(outbound_flows)
+        megabytes_transferred = total_outbound_bytes / 1_000_000
+
+        total_inbound_bytes = max(inbound_bytes_by_host.get(source_ip, 0), 1)
+        upload_download_ratio = total_outbound_bytes / total_inbound_bytes
+
+        unique_external_destinations = len({f.destination_ip for f in outbound_flows})
+
+        base_confidence = total_outbound_bytes / (EXFIL_BYTES_THRESHOLD * 10)
+        if upload_download_ratio >= EXFIL_UPLOAD_RATIO_HIGH:
+            base_confidence *= 1.25
+        if unique_external_destinations == 1:
+            base_confidence *= 1.10
+
+        evidence = [
+            f"Total outbound bytes: {total_outbound_bytes:,} ({megabytes_transferred:.1f} MB)",
+            f"External flow count: {outbound_flow_count}",
+            f"Unique external destinations: {unique_external_destinations}",
+            f"Upload:download ratio: {upload_download_ratio:.1f}x"
+            + (" — heavily upload-dominant" if upload_download_ratio >= EXFIL_UPLOAD_RATIO_HIGH else ""),
+        ]
+
+        exfil_alerts.append(
+            ThreatAlertRecord(
                 alert_id=str(uuid.uuid4())[:8],
                 source_ip=source_ip,
-                destination_ip="external",
+                destination_ip="external" if unique_external_destinations > 1 else outbound_flows[0].destination_ip,
                 threat_category=ThreatCategory.EXFILTRATION,
-                risk_level=RiskLevel.CRITICAL if total_outbound_bytes > EXFIL_BYTES_THRESHOLD * 5 else RiskLevel.HIGH,
-                confidence_score=min(0.88, total_outbound_bytes / (EXFIL_BYTES_THRESHOLD * 10)),
+                risk_level=(
+                    RiskLevel.CRITICAL
+                    if total_outbound_bytes > EXFIL_BYTES_THRESHOLD * 5
+                    else RiskLevel.HIGH
+                ),
+                confidence_score=min(0.93, base_confidence),
                 description=(
                     f"Possible data exfiltration: {source_ip} transferred {megabytes_transferred:.1f} MB "
-                    f"to external destinations across {outbound_flow_count} flows."
+                    f"to {unique_external_destinations} external destination(s) across {outbound_flow_count} flows "
+                    f"(upload:download ratio {upload_download_ratio:.1f}x)."
                 ),
-                evidence=[
-                    f"Total outbound bytes: {total_outbound_bytes:,}",
-                    f"External flow count: {outbound_flow_count}",
-                ],
+                evidence=evidence,
+                possible_false_positive=get_false_positive_explanations(ThreatCategory.EXFILTRATION),
+                recommended_actions=get_recommended_actions(ThreatCategory.EXFILTRATION),
                 mitre_technique_id=MITRE_TECHNIQUE_EXFIL_C2,
                 mitre_technique_name="Exfiltration Over C2 Channel",
                 mitre_tactic_id=MITRE_TACTIC_EXFILTRATION,
                 mitre_tactic_name="Exfiltration",
                 timestamp=datetime.now(timezone.utc).isoformat(),
-            ))
+            )
+        )
 
     return exfil_alerts
 
@@ -336,29 +449,35 @@ def _detect_brute_force_attempts(network_flows: list[NetworkFlowRecord]) -> list
 
         if total_connection_attempts >= BRUTE_FORCE_ATTEMPT_MIN and len(rst_heavy_flows) > 2:
             service_name = _port_to_service_name(dest_port)
-            brute_force_alerts.append(ThreatAlertRecord(
-                alert_id=str(uuid.uuid4())[:8],
-                source_ip=source_ip,
-                destination_ip=dest_ip,
-                threat_category=ThreatCategory.BRUTE_FORCE,
-                risk_level=RiskLevel.HIGH,
-                confidence_score=min(0.92, total_connection_attempts / (BRUTE_FORCE_ATTEMPT_MIN * 5)),
-                description=(
-                    f"Brute force attack suspected: {source_ip} made {total_connection_attempts} "
-                    f"{service_name} connection attempts to {dest_ip}:{dest_port} "
-                    f"with {len(rst_heavy_flows)} reset-heavy flows."
-                ),
-                evidence=[
-                    f"Total SYN attempts: {total_connection_attempts}",
-                    f"Reset-heavy flows: {len(rst_heavy_flows)}",
-                    f"Target service: {service_name} (port {dest_port})",
-                ],
-                mitre_technique_id=MITRE_TECHNIQUE_BRUTE_FORCE,
-                mitre_technique_name="Brute Force",
-                mitre_tactic_id=MITRE_TACTIC_RECON,
-                mitre_tactic_name="Credential Access",
-                timestamp=datetime.now(timezone.utc).isoformat(),
-            ))
+            brute_force_alerts.append(
+                ThreatAlertRecord(
+                    alert_id=str(uuid.uuid4())[:8],
+                    source_ip=source_ip,
+                    destination_ip=dest_ip,
+                    threat_category=ThreatCategory.BRUTE_FORCE,
+                    risk_level=RiskLevel.HIGH,
+                    confidence_score=min(
+                        0.92, total_connection_attempts / (BRUTE_FORCE_ATTEMPT_MIN * 5)
+                    ),
+                    description=(
+                        f"Brute force attack suspected: {source_ip} made {total_connection_attempts} "
+                        f"{service_name} connection attempts to {dest_ip}:{dest_port} "
+                        f"with {len(rst_heavy_flows)} reset-heavy flows."
+                    ),
+                    evidence=[
+                        f"Total SYN attempts: {total_connection_attempts}",
+                        f"Reset-heavy flows: {len(rst_heavy_flows)}",
+                        f"Target service: {service_name} (port {dest_port})",
+                    ],
+                    possible_false_positive=get_false_positive_explanations(ThreatCategory.BRUTE_FORCE),
+                    recommended_actions=get_recommended_actions(ThreatCategory.BRUTE_FORCE),
+                    mitre_technique_id=MITRE_TECHNIQUE_BRUTE_FORCE,
+                    mitre_technique_name="Brute Force",
+                    mitre_tactic_id=MITRE_TACTIC_RECON,
+                    mitre_tactic_name="Credential Access",
+                    timestamp=datetime.now(timezone.utc).isoformat(),
+                )
+            )
 
     return brute_force_alerts
 
@@ -375,77 +494,91 @@ def _detect_smb_enumeration(packet_records: list[ParsedPacketRecord]) -> list[Th
         unique_smb_targets = {p.destination_ip for p in smb_packets}
         if len(smb_packets) >= SMB_ENUM_PACKET_MIN and len(unique_smb_targets) >= 2:
             smb_commands_seen = Counter(p.smb_command for p in smb_packets if p.smb_command)
-            smb_alerts.append(ThreatAlertRecord(
-                alert_id=str(uuid.uuid4())[:8],
-                source_ip=source_ip,
-                destination_ip=f"{len(unique_smb_targets)} hosts",
-                threat_category=ThreatCategory.SMB_ENUM,
-                risk_level=RiskLevel.HIGH,
-                confidence_score=min(0.90, len(smb_packets) / 100),
-                description=(
-                    f"SMB enumeration detected: {source_ip} sent {len(smb_packets)} SMB packets "
-                    f"to {len(unique_smb_targets)} unique hosts."
-                ),
-                evidence=[
-                    f"SMB packet count: {len(smb_packets)}",
-                    f"Unique SMB targets: {len(unique_smb_targets)}",
-                    f"Commands observed: {dict(smb_commands_seen.most_common(3))}",
-                ],
-                mitre_technique_id=MITRE_TECHNIQUE_SMB_LATERAL,
-                mitre_technique_name="SMB/Windows Admin Shares",
-                mitre_tactic_id=MITRE_TACTIC_LATERAL_MOVE,
-                mitre_tactic_name="Lateral Movement",
-                timestamp=datetime.now(timezone.utc).isoformat(),
-            ))
+            smb_alerts.append(
+                ThreatAlertRecord(
+                    alert_id=str(uuid.uuid4())[:8],
+                    source_ip=source_ip,
+                    destination_ip=f"{len(unique_smb_targets)} hosts",
+                    threat_category=ThreatCategory.SMB_ENUM,
+                    risk_level=RiskLevel.HIGH,
+                    confidence_score=min(0.90, len(smb_packets) / 100),
+                    description=(
+                        f"SMB enumeration detected: {source_ip} sent {len(smb_packets)} SMB packets "
+                        f"to {len(unique_smb_targets)} unique hosts."
+                    ),
+                    evidence=[
+                        f"SMB packet count: {len(smb_packets)}",
+                        f"Unique SMB targets: {len(unique_smb_targets)}",
+                        f"Commands observed: {dict(smb_commands_seen.most_common(3))}",
+                    ],
+                    possible_false_positive=get_false_positive_explanations(ThreatCategory.SMB_ENUM),
+                    recommended_actions=get_recommended_actions(ThreatCategory.SMB_ENUM),
+                    mitre_technique_id=MITRE_TECHNIQUE_SMB_LATERAL,
+                    mitre_technique_name="SMB/Windows Admin Shares",
+                    mitre_tactic_id=MITRE_TACTIC_LATERAL_MOVE,
+                    mitre_tactic_name="Lateral Movement",
+                    timestamp=datetime.now(timezone.utc).isoformat(),
+                )
+            )
 
     return smb_alerts
 
 
 def _detect_lateral_movement(network_flows: list[NetworkFlowRecord]) -> list[ThreatAlertRecord]:
     lateral_alerts: list[ThreatAlertRecord] = []
-    private_prefixes = ("10.", "172.16.", "172.17.", "172.18.", "172.19.",
-                        "172.20.", "192.168.")
+    private_prefixes = ("10.", "172.16.", "172.17.", "172.18.", "172.19.", "172.20.", "192.168.")
 
     lateral_targets_by_source: dict[str, set[str]] = defaultdict(set)
 
     for flow in network_flows:
         source_is_internal = any(flow.source_ip.startswith(prefix) for prefix in private_prefixes)
-        dest_is_internal = any(flow.destination_ip.startswith(prefix) for prefix in private_prefixes)
+        dest_is_internal = any(
+            flow.destination_ip.startswith(prefix) for prefix in private_prefixes
+        )
 
         if source_is_internal and dest_is_internal and flow.destination_port in REMOTE_ACCESS_PORTS:
             lateral_targets_by_source[flow.source_ip].add(flow.destination_ip)
 
     for source_ip, target_hosts in lateral_targets_by_source.items():
         if len(target_hosts) >= LATERAL_MOVEMENT_MIN_HOSTS:
-            lateral_alerts.append(ThreatAlertRecord(
-                alert_id=str(uuid.uuid4())[:8],
-                source_ip=source_ip,
-                destination_ip=f"{len(target_hosts)} internal hosts",
-                threat_category=ThreatCategory.LATERAL_MOVEMENT,
-                risk_level=RiskLevel.CRITICAL,
-                confidence_score=min(0.92, len(target_hosts) / 10),
-                description=(
-                    f"Lateral movement detected: {source_ip} connected to {len(target_hosts)} "
-                    f"internal hosts via remote-access protocols (RDP/SSH/SMB/WinRM)."
-                ),
-                evidence=[
-                    f"Unique internal targets: {len(target_hosts)}",
-                    f"Target IPs: {sorted(target_hosts)[:5]}",
-                ],
-                mitre_technique_id=MITRE_TECHNIQUE_SMB_LATERAL,
-                mitre_technique_name="Remote Services",
-                mitre_tactic_id=MITRE_TACTIC_LATERAL_MOVE,
-                mitre_tactic_name="Lateral Movement",
-                timestamp=datetime.now(timezone.utc).isoformat(),
-            ))
+            lateral_alerts.append(
+                ThreatAlertRecord(
+                    alert_id=str(uuid.uuid4())[:8],
+                    source_ip=source_ip,
+                    destination_ip=f"{len(target_hosts)} internal hosts",
+                    threat_category=ThreatCategory.LATERAL_MOVEMENT,
+                    risk_level=RiskLevel.CRITICAL,
+                    confidence_score=min(0.92, len(target_hosts) / 10),
+                    description=(
+                        f"Lateral movement detected: {source_ip} connected to {len(target_hosts)} "
+                        f"internal hosts via remote-access protocols (RDP/SSH/SMB/WinRM)."
+                    ),
+                    evidence=[
+                        f"Unique internal targets: {len(target_hosts)}",
+                        f"Target IPs: {sorted(target_hosts)[:5]}",
+                    ],
+                    possible_false_positive=get_false_positive_explanations(ThreatCategory.LATERAL_MOVEMENT),
+                    recommended_actions=get_recommended_actions(ThreatCategory.LATERAL_MOVEMENT),
+                    mitre_technique_id=MITRE_TECHNIQUE_SMB_LATERAL,
+                    mitre_technique_name="Remote Services",
+                    mitre_tactic_id=MITRE_TACTIC_LATERAL_MOVE,
+                    mitre_tactic_name="Lateral Movement",
+                    timestamp=datetime.now(timezone.utc).isoformat(),
+                )
+            )
 
     return lateral_alerts
 
 
 def _port_to_service_name(port_number: int) -> str:
     port_service_map = {
-        21: "FTP", 22: "SSH", 23: "Telnet", 3389: "RDP",
-        5900: "VNC", 5985: "WinRM", 5986: "WinRM-HTTPS",
+        21: "FTP",
+        22: "SSH",
+        23: "Telnet",
+        3389: "RDP",
+        5900: "VNC",
+        5985: "WinRM",
+        5986: "WinRM-HTTPS",
     }
     return port_service_map.get(port_number, f"port-{port_number}")
 
@@ -483,19 +616,21 @@ def extract_traffic_features_per_host(
     host_feature_list = []
 
     for host_ip in all_host_ips:
-        host_feature_list.append({
-            "ip_address": host_ip,
-            "bytes_sent": bytes_sent_by_host[host_ip],
-            "bytes_received": bytes_received_by_host[host_ip],
-            "unique_destination_count": len(unique_destinations_by_host[host_ip]),
-            "unique_port_contact_count": len(unique_ports_contacted_by_host[host_ip]),
-            "dns_query_count": dns_query_count_by_host[host_ip],
-            "syn_packet_count": syn_count_by_host[host_ip],
-            "rst_packet_count": rst_count_by_host[host_ip],
-            "risky_port_contact_count": risky_port_contacts_by_host[host_ip],
-            "outbound_to_inbound_ratio": (
-                bytes_sent_by_host[host_ip] / max(bytes_received_by_host[host_ip], 1)
-            ),
-        })
+        host_feature_list.append(
+            {
+                "ip_address": host_ip,
+                "bytes_sent": bytes_sent_by_host[host_ip],
+                "bytes_received": bytes_received_by_host[host_ip],
+                "unique_destination_count": len(unique_destinations_by_host[host_ip]),
+                "unique_port_contact_count": len(unique_ports_contacted_by_host[host_ip]),
+                "dns_query_count": dns_query_count_by_host[host_ip],
+                "syn_packet_count": syn_count_by_host[host_ip],
+                "rst_packet_count": rst_count_by_host[host_ip],
+                "risky_port_contact_count": risky_port_contacts_by_host[host_ip],
+                "outbound_to_inbound_ratio": (
+                    bytes_sent_by_host[host_ip] / max(bytes_received_by_host[host_ip], 1)
+                ),
+            }
+        )
 
     return host_feature_list

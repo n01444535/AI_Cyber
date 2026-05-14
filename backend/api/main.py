@@ -3,7 +3,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
-from fastapi import FastAPI, HTTPException, UploadFile, File, BackgroundTasks
+from fastapi import BackgroundTasks, FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse
 from pydantic import BaseModel
@@ -25,14 +25,13 @@ from backend.scanners.nmap_parser import convert_hosts_to_feature_dicts, parse_n
 from backend.database import SessionRepository
 from backend.threat_intel.ioc_lookup import IOCLookupService, extract_unique_external_ips
 
-
-API_TITLE       = "AI Cyber Fusion Platform API"
-API_VERSION     = "1.0.0"
+API_TITLE = "AI Cyber Fusion Platform API"
+API_VERSION = "1.0.0"
 API_DESCRIPTION = "Autonomous AI-Powered Threat Detection & Behavioral Security Analysis"
 
 REPORTS_OUTPUT_DIR = "reports/"
-MODELS_SAVE_DIR    = "models/"
-DB_FILE_PATH       = "cyber_platform.db"
+MODELS_SAVE_DIR = "models/"
+DB_FILE_PATH = "cyber_platform.db"
 
 app = FastAPI(title=API_TITLE, version=API_VERSION, description=API_DESCRIPTION)
 
@@ -44,16 +43,17 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-_host_anomaly_detector    = HostAnomalyDetector()
+_host_anomaly_detector = HostAnomalyDetector()
 _traffic_anomaly_detector = TrafficAnomalyDetector()
-_host_classifier          = SuspiciousHostClassifier()
-_traffic_clusterer        = TrafficClusterer()
-_ioc_service              = IOCLookupService(cache_directory=".")
-_session_repository       = SessionRepository(DB_FILE_PATH)
+_host_classifier = SuspiciousHostClassifier()
+_traffic_clusterer = TrafficClusterer()
+_ioc_service = IOCLookupService(cache_directory=".")
+_session_repository = SessionRepository(DB_FILE_PATH)
 _session_store: dict[str, ScanSessionResult] = {}
 
 
 # ── Pydantic request/response models ──────────────────────────────────────────
+
 
 class NmapAnalysisRequest(BaseModel):
     xml_file_path: str
@@ -100,23 +100,31 @@ class SessionSummaryResponse(BaseModel):
 
 # ── Endpoints ──────────────────────────────────────────────────────────────────
 
+
 @app.get("/", response_class=HTMLResponse)
 def read_root() -> str:
     return """
     <html><body style="font-family:monospace;background:#0f172a;color:#60a5fa;padding:40px">
-    <h1>🛡 AI Cyber Fusion Platform API</h1>
+    <h1>&#x1F6E1; AI Cyber Fusion Platform API</h1>
     <p style="color:#94a3b8">Autonomous Threat Detection &amp; Behavioral Security Analysis</p>
-    <ul style="margin-top:20px;color:#e2e8f0">
-      <li>POST /analyze/nmap — Analyze Nmap XML scan results</li>
-      <li>POST /analyze/pcap — Analyze PCAP traffic file</li>
-      <li>POST /analyze/full — Full analysis (Nmap + PCAP)</li>
-      <li>POST /explain/ip — AI explanation for a specific host</li>
-      <li>POST /ioc/lookup — IOC lookup via VirusTotal / AbuseIPDB</li>
-      <li>GET /session/{id} — Get session summary</li>
-      <li>GET /report/{id}/html — Download HTML report</li>
-      <li>GET /health — Health check</li>
+    <ul style="margin-top:20px;color:#e2e8f0;line-height:2">
+      <li>POST /analyze/nmap &mdash; Analyze Nmap XML (server-side file path)</li>
+      <li>POST /analyze/pcap &mdash; Analyze uploaded PCAP traffic file</li>
+      <li>POST /analyze/full &mdash; Full analysis: upload both Nmap XML + PCAP</li>
+      <li>POST /explain/ip &mdash; AI explanation for a specific host IP</li>
+      <li>POST /ioc/lookup &mdash; IOC lookup via VirusTotal / AbuseIPDB</li>
+      <li>GET  /sessions &mdash; List past scan sessions</li>
+      <li>GET  /sessions/{id}/hosts &mdash; Host profiles for a session</li>
+      <li>GET  /sessions/{id}/alerts &mdash; Threat alerts for a session</li>
+      <li>GET  /sessions/{id}/stories &mdash; Attack stories for a session</li>
+      <li>GET  /session/{id} &mdash; Session summary (in-memory)</li>
+      <li>GET  /report/{id}/html &mdash; Download HTML report</li>
+      <li>GET  /report/{id}/json &mdash; Download JSON report</li>
+      <li>GET  /hosts/{ip}/history &mdash; Session history for an IP</li>
+      <li>DELETE /sessions/{id} &mdash; Delete a session record</li>
+      <li>GET  /health &mdash; Health check</li>
     </ul>
-    <p style="margin-top:20px"><a href="/docs" style="color:#60a5fa">📖 Interactive API Docs →</a></p>
+    <p style="margin-top:20px"><a href="/docs" style="color:#60a5fa">&#x1F4D6; Interactive API Docs &#x2192;</a></p>
     </body></html>
     """
 
@@ -129,7 +137,9 @@ def check_health() -> dict:
 @app.post("/analyze/nmap", response_model=NmapAnalysisResponse)
 def analyze_nmap_scan(request: NmapAnalysisRequest) -> NmapAnalysisResponse:
     if not Path(request.xml_file_path).exists():
-        raise HTTPException(status_code=404, detail=f"Nmap XML file not found: {request.xml_file_path}")
+        raise HTTPException(
+            status_code=404, detail=f"Nmap XML file not found: {request.xml_file_path}"
+        )
 
     session_id = str(uuid.uuid4())[:12]
     scan_timestamp = datetime.now(timezone.utc).isoformat()
@@ -182,8 +192,10 @@ def analyze_nmap_scan(request: NmapAnalysisRequest) -> NmapAnalysisResponse:
         critical_host_count=len(critical_hosts),
         top_risk_hosts=[
             {
-                "ip": p.ip_address, "hostname": p.hostname,
-                "risk_level": p.risk_level.value, "score": p.risk_score,
+                "ip": p.ip_address,
+                "hostname": p.hostname,
+                "risk_level": p.risk_level.value,
+                "score": p.risk_score,
                 "explanation": p.ai_explanation,
             }
             for p in host_profiles[:5]
@@ -260,7 +272,9 @@ async def analyze_pcap_traffic(pcap_file: UploadFile = File(...)) -> dict:
             "alert_count": len(threat_alerts),
             "anomaly_count": sum(1 for r in anomaly_results if r.is_anomaly),
             "attack_story_count": len(attack_stories),
-            "critical_host_count": sum(1 for p in host_profiles if p.risk_level.value == "Critical"),
+            "critical_host_count": sum(
+                1 for p in host_profiles if p.risk_level.value == "Critical"
+            ),
             "top_alerts": [
                 {
                     "category": a.threat_category.value,
@@ -274,6 +288,112 @@ async def analyze_pcap_traffic(pcap_file: UploadFile = File(...)) -> dict:
         }
     finally:
         Path(temp_pcap_path).unlink(missing_ok=True)
+
+
+@app.post("/analyze/full")
+async def analyze_full(
+    nmap_file: UploadFile = File(..., description="Nmap XML scan output file"),
+    pcap_file: UploadFile = File(..., description="PCAP or PCAPNG traffic file"),
+    enable_ioc: bool = Form(False),
+) -> dict:
+    import tempfile
+
+    session_id = str(uuid.uuid4())[:12]
+    scan_timestamp = datetime.now(timezone.utc).isoformat()
+
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".xml") as tmp_nmap:
+        tmp_nmap_path = tmp_nmap.name
+        tmp_nmap.write(await nmap_file.read())
+
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".pcap") as tmp_pcap:
+        tmp_pcap_path = tmp_pcap.name
+        tmp_pcap.write(await pcap_file.read())
+
+    try:
+        scanned_hosts = parse_nmap_xml_file(tmp_nmap_path)
+        packet_records = parse_pcap_file(tmp_pcap_path)
+
+        if not scanned_hosts and not packet_records:
+            raise HTTPException(status_code=400, detail="Both files produced no usable data.")
+
+        network_flows = build_network_flows(packet_records)
+        threat_alerts = detect_threats_in_traffic(packet_records, network_flows)
+
+        host_scan_features = convert_hosts_to_feature_dicts(scanned_hosts)
+        traffic_features = extract_traffic_features_per_host(packet_records, network_flows)
+
+        _host_anomaly_detector.train(host_scan_features)
+        _traffic_anomaly_detector.train(traffic_features)
+        host_anomaly_results = _host_anomaly_detector.detect_anomalies(host_scan_features)
+        traffic_anomaly_results = _traffic_anomaly_detector.detect_anomalies(traffic_features)
+        all_anomaly_results = host_anomaly_results + traffic_anomaly_results
+
+        ioc_results = []
+        if enable_ioc:
+            external_ips = extract_unique_external_ips(traffic_features)
+            if external_ips:
+                ioc_results = _ioc_service.lookup_indicators_in_bulk(external_ips[:20])
+
+        attack_stories = correlate_alerts_into_stories(threat_alerts)
+        host_profiles = calculate_host_risk_profiles(
+            scanned_hosts=scanned_hosts,
+            threat_alerts=threat_alerts,
+            anomaly_results=all_anomaly_results,
+            ioc_results=ioc_results,
+            attack_stories=attack_stories,
+        )
+
+        all_timeline_events = [
+            event for story in attack_stories for event in story.timeline_events
+        ]
+        executive_summary = _compose_executive_summary(host_profiles, threat_alerts, attack_stories)
+
+        session_result = ScanSessionResult(
+            session_id=session_id,
+            scan_timestamp=scan_timestamp,
+            scanned_hosts=scanned_hosts,
+            threat_alerts=threat_alerts,
+            host_risk_profiles=host_profiles,
+            attack_stories=attack_stories,
+            timeline_events=all_timeline_events,
+            total_risk_score=max((p.risk_score for p in host_profiles), default=0.0),
+            executive_summary=executive_summary,
+            nmap_file_path=nmap_file.filename,
+            pcap_file_path=pcap_file.filename,
+        )
+        _session_store[session_id] = session_result
+        _session_repository.save_session(session_result)
+
+        return {
+            "session_id": session_id,
+            "host_count": len(scanned_hosts),
+            "packet_count": len(packet_records),
+            "flow_count": len(network_flows),
+            "alert_count": len(threat_alerts),
+            "attack_story_count": len(attack_stories),
+            "critical_host_count": sum(
+                1 for p in host_profiles if p.risk_level.value == "Critical"
+            ),
+            "overall_risk_score": session_result.total_risk_score,
+            "executive_summary": executive_summary,
+            "message": (
+                f"Full analysis complete: {len(scanned_hosts)} hosts, "
+                f"{len(packet_records)} packets, {len(threat_alerts)} alerts."
+            ),
+        }
+    finally:
+        Path(tmp_nmap_path).unlink(missing_ok=True)
+        Path(tmp_pcap_path).unlink(missing_ok=True)
+
+
+@app.delete("/sessions/{session_id}")
+def delete_session(session_id: str) -> dict:
+    """Remove a session and all its child records from the database."""
+    _session_store.pop(session_id, None)
+    deleted = _session_repository.delete_session(session_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail=f"Session {session_id} not found.")
+    return {"deleted": True, "session_id": session_id}
 
 
 @app.post("/explain/ip", response_model=IPExplainResponse)
@@ -421,16 +541,20 @@ def get_session_stories(session_id: str) -> dict:
 def get_host_history(ip_address: str) -> dict:
     """Return all past sessions that include a specific host IP."""
     past_sessions = _session_repository.find_sessions_by_ip(ip_address)
-    return {"ip_address": ip_address, "session_count": len(past_sessions), "sessions": past_sessions}
+    return {
+        "ip_address": ip_address,
+        "session_count": len(past_sessions),
+        "sessions": past_sessions,
+    }
 
 
 def _compose_executive_summary(host_profiles, threat_alerts, attack_stories) -> str:
     from backend.models import RiskLevel
 
     critical_count = sum(1 for p in host_profiles if p.risk_level == RiskLevel.CRITICAL)
-    high_count     = sum(1 for p in host_profiles if p.risk_level == RiskLevel.HIGH)
-    alert_count    = len(threat_alerts)
-    story_count    = len(attack_stories)
+    high_count = sum(1 for p in host_profiles if p.risk_level == RiskLevel.HIGH)
+    alert_count = len(threat_alerts)
+    story_count = len(attack_stories)
 
     if critical_count == 0 and alert_count == 0:
         return "No significant threats detected. Network appears within normal parameters."
@@ -443,6 +567,8 @@ def _compose_executive_summary(host_profiles, threat_alerts, attack_stories) -> 
     if alert_count > 0:
         parts.append(f"{alert_count} threat alert(s) generated.")
     if story_count > 0:
-        parts.append(f"{story_count} correlated attack story(ies) detected — possible coordinated attack campaign.")
+        parts.append(
+            f"{story_count} correlated attack story(ies) detected — possible coordinated attack campaign."
+        )
 
     return " ".join(parts)

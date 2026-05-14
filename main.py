@@ -1,21 +1,19 @@
 #!/usr/bin/env python3
 """
-AI Cyber Fusion Platform — CLI entry point.
-Usage:
-  python main.py nmap  <nmap_xml_file>   [--ioc]
-  python main.py pcap  <pcap_file>
-  python main.py full  <nmap_xml_file>   <pcap_file>  [--ioc]
-  python main.py explain <nmap_xml_file> <ip_address>
-  python main.py api
-  python main.py demo
-  python main.py history [--limit N]
+AI Cyber Fusion Platform — Autonomous Threat Detection & SOC-style Analysis
+
+  python main.py demo                              # Run with synthetic attack data
+  python main.py nmap   <nmap_xml>   [--ioc]      # Analyze Nmap XML scan
+  python main.py pcap   <pcap_file>               # Analyze packet capture
+  python main.py full   <nmap_xml>   <pcap_file>  # Combined Nmap + PCAP analysis
+  python main.py explain <nmap_xml>  <ip_address> # AI explanation for one host
+  python main.py history [--limit N]              # Browse past scan sessions
+  python main.py api                              # Start REST API on :8000
 """
 
 import argparse
-import sys
 import uuid
 from datetime import datetime, timezone
-from pathlib import Path
 
 DB_FILE_PATH = "cyber_platform.db"
 
@@ -23,6 +21,7 @@ DB_FILE_PATH = "cyber_platform.db"
 def _save_session_to_db(session, report_paths: dict) -> None:
     """Persist a completed session + report paths to SQLite."""
     from backend.database import SessionRepository
+
     repository = SessionRepository(DB_FILE_PATH)
     repository.save_session(
         session,
@@ -39,7 +38,7 @@ def run_nmap_analysis(nmap_xml_path: str, enable_ioc: bool) -> None:
     from backend.risk_engine import calculate_host_risk_profiles
     from backend.scanners.nmap_parser import convert_hosts_to_feature_dicts, parse_nmap_xml_file
     from backend.threat_intel.ioc_lookup import IOCLookupService, extract_unique_external_ips
-    from frontend.dashboard import render_full_session_dashboard, print_quick_summary
+    from frontend.dashboard import render_full_session_dashboard
 
     print(f"[*] Parsing Nmap XML: {nmap_xml_path}")
     scanned_hosts = parse_nmap_xml_file(nmap_xml_path)
@@ -90,7 +89,7 @@ def run_nmap_analysis(nmap_xml_path: str, enable_ioc: bool) -> None:
     render_full_session_dashboard(session)
     report_paths = generate_report(session, "reports/")
     _save_session_to_db(session, report_paths)
-    print(f"\n[+] Reports saved:")
+    print("\n[+] Reports saved:")
     print(f"    JSON: {report_paths['json']}")
     print(f"    HTML: {report_paths['html']}")
     print(f"[+] Session {session.session_id} persisted to {DB_FILE_PATH}")
@@ -108,7 +107,6 @@ def run_pcap_analysis(pcap_file_path: str) -> None:
     )
     from backend.reports.report_generator import generate_report
     from backend.risk_engine import calculate_host_risk_profiles
-    from backend.threat_intel.ioc_lookup import IOCLookupService, extract_unique_external_ips
     from frontend.dashboard import render_full_session_dashboard
 
     print(f"[*] Parsing PCAP: {pcap_file_path}")
@@ -161,7 +159,7 @@ def run_pcap_analysis(pcap_file_path: str) -> None:
     render_full_session_dashboard(session)
     report_paths = generate_report(session, "reports/")
     _save_session_to_db(session, report_paths)
-    print(f"\n[+] Reports saved:")
+    print("\n[+] Reports saved:")
     print(f"    JSON: {report_paths['json']}")
     print(f"    HTML: {report_paths['html']}")
     print(f"[+] Session {session.session_id} persisted to {DB_FILE_PATH}")
@@ -196,13 +194,13 @@ def run_full_analysis(nmap_xml_path: str, pcap_file_path: str, enable_ioc: bool)
     print(f"[+] Threats detected: {len(threat_alerts)}.")
 
     host_scan_features = convert_hosts_to_feature_dicts(scanned_hosts)
-    traffic_features   = extract_traffic_features_per_host(packet_records, network_flows)
+    traffic_features = extract_traffic_features_per_host(packet_records, network_flows)
 
-    host_anomaly_detector    = HostAnomalyDetector()
+    host_anomaly_detector = HostAnomalyDetector()
     traffic_anomaly_detector = TrafficAnomalyDetector()
     host_anomaly_detector.train(host_scan_features)
     traffic_anomaly_detector.train(traffic_features)
-    host_anomaly_results    = host_anomaly_detector.detect_anomalies(host_scan_features)
+    host_anomaly_results = host_anomaly_detector.detect_anomalies(host_scan_features)
     traffic_anomaly_results = traffic_anomaly_detector.detect_anomalies(traffic_features)
     all_anomaly_results = host_anomaly_results + traffic_anomaly_results
 
@@ -245,14 +243,13 @@ def run_full_analysis(nmap_xml_path: str, pcap_file_path: str, enable_ioc: bool)
     render_full_session_dashboard(session)
     report_paths = generate_report(session, "reports/")
     _save_session_to_db(session, report_paths)
-    print(f"\n[+] Reports saved:")
+    print("\n[+] Reports saved:")
     print(f"    JSON: {report_paths['json']}")
     print(f"    HTML: {report_paths['html']}")
     print(f"[+] Session {session.session_id} persisted to {DB_FILE_PATH}")
 
 
 def run_host_explanation(nmap_xml_path: str, target_ip: str) -> None:
-    from backend.correlation.engine import correlate_alerts_into_stories
     from backend.ml.anomaly_detector import HostAnomalyDetector
     from backend.models import ScanSessionResult
     from backend.risk_engine import calculate_host_risk_profiles
@@ -290,47 +287,60 @@ def run_host_explanation(nmap_xml_path: str, target_ip: str) -> None:
 
 
 def run_demo_mode() -> None:
-    from frontend.dashboard import render_full_session_dashboard
+    from backend.analyst.recommendations import get_false_positive_explanations, get_recommended_actions
+    from backend.correlation.engine import correlate_alerts_into_stories
     from backend.models import (
-        ScanSessionResult, ScannedHostRecord, PortRecord,
-        ThreatAlertRecord, ThreatCategory, RiskLevel,
-        CorrelatedAttackStory, AttackTimelineEvent, HostRiskProfile,
         AnomalyDetectionResult,
+        PortRecord,
+        RiskLevel,
+        ScanSessionResult,
+        ScannedHostRecord,
+        ThreatAlertRecord,
+        ThreatCategory,
     )
     from backend.risk_engine import calculate_host_risk_profiles
-    from backend.correlation.engine import correlate_alerts_into_stories
+    from frontend.dashboard import render_full_session_dashboard
 
     print("[*] Running demo with synthetic data...")
 
     demo_hosts = [
         ScannedHostRecord(
-            ip_address="192.168.1.50", hostname="srv-web-01",
-            operating_system="Windows Server 2019", mac_address="00:50:56:aa:bb:01", mac_vendor="VMware",
+            ip_address="192.168.1.50",
+            hostname="srv-web-01",
+            operating_system="Windows Server 2019",
+            mac_address="00:50:56:aa:bb:01",
+            mac_vendor="VMware",
             open_ports=[
                 PortRecord(445, "tcp", "open", "microsoft-ds", "Windows", ""),
                 PortRecord(3389, "tcp", "open", "ms-wbt-server", "", ""),
-                PortRecord(80,   "tcp", "open", "http", "IIS", "10.0"),
+                PortRecord(80, "tcp", "open", "http", "IIS", "10.0"),
             ],
             scan_timestamp=datetime.now(timezone.utc).isoformat(),
         ),
         ScannedHostRecord(
-            ip_address="192.168.1.20", hostname="db-server",
-            operating_system="Ubuntu 22.04", mac_address="00:50:56:aa:bb:02", mac_vendor="VMware",
+            ip_address="192.168.1.20",
+            hostname="db-server",
+            operating_system="Ubuntu 22.04",
+            mac_address="00:50:56:aa:bb:02",
+            mac_vendor="VMware",
             open_ports=[
-                PortRecord(3306, "tcp", "open", "mysql",      "MySQL", "8.0"),
+                PortRecord(3306, "tcp", "open", "mysql", "MySQL", "8.0"),
                 PortRecord(5432, "tcp", "open", "postgresql", "PostgreSQL", "14"),
-                PortRecord(27017,"tcp", "open", "mongod",     "MongoDB", "6.0"),
-                PortRecord(6379, "tcp", "open", "redis",      "Redis", "7.0"),
-                PortRecord(22,   "tcp", "open", "ssh",        "OpenSSH", "8.9"),
+                PortRecord(27017, "tcp", "open", "mongod", "MongoDB", "6.0"),
+                PortRecord(6379, "tcp", "open", "redis", "Redis", "7.0"),
+                PortRecord(22, "tcp", "open", "ssh", "OpenSSH", "8.9"),
             ],
             scan_timestamp=datetime.now(timezone.utc).isoformat(),
         ),
         ScannedHostRecord(
-            ip_address="10.0.0.1", hostname="router-gw",
-            operating_system="Cisco IOS", mac_address="aa:bb:cc:dd:ee:ff", mac_vendor="Cisco",
+            ip_address="10.0.0.1",
+            hostname="router-gw",
+            operating_system="Cisco IOS",
+            mac_address="aa:bb:cc:dd:ee:ff",
+            mac_vendor="Cisco",
             open_ports=[
-                PortRecord(23,  "tcp", "open", "telnet", "", ""),
-                PortRecord(161, "udp", "open", "snmp",   "", ""),
+                PortRecord(23, "tcp", "open", "telnet", "", ""),
+                PortRecord(161, "udp", "open", "snmp", "", ""),
             ],
             scan_timestamp=datetime.now(timezone.utc).isoformat(),
         ),
@@ -345,7 +355,9 @@ def run_demo_mode() -> None:
             risk_level=RiskLevel.HIGH,
             confidence_score=0.92,
             description="Port scan: 192.168.1.100 probed 87 unique ports in 60s.",
-            evidence=["Unique ports: 87", "SYN packets without ACK"],
+            evidence=["Unique ports: 87", "SYN packets without ACK", "Time window: 60s"],
+            possible_false_positive=get_false_positive_explanations(ThreatCategory.PORT_SCAN),
+            recommended_actions=get_recommended_actions(ThreatCategory.PORT_SCAN),
             mitre_technique_id="T1046",
             mitre_technique_name="Network Service Discovery",
             mitre_tactic_id="TA0043",
@@ -360,7 +372,9 @@ def run_demo_mode() -> None:
             risk_level=RiskLevel.HIGH,
             confidence_score=0.88,
             description="SMB enumeration: 192.168.1.100 sent 45 SMB packets to 3 hosts.",
-            evidence=["SMB packet count: 45", "Unique targets: 3"],
+            evidence=["SMB packet count: 45", "Unique targets: 3", "Protocols: SMB1, SMB2"],
+            possible_false_positive=get_false_positive_explanations(ThreatCategory.SMB_ENUM),
+            recommended_actions=get_recommended_actions(ThreatCategory.SMB_ENUM),
             mitre_technique_id="T1021.002",
             mitre_technique_name="SMB/Windows Admin Shares",
             mitre_tactic_id="TA0008",
@@ -374,8 +388,15 @@ def run_demo_mode() -> None:
             threat_category=ThreatCategory.BEACONING,
             risk_level=RiskLevel.CRITICAL,
             confidence_score=0.95,
-            description="Beaconing: 192.168.1.100 sends periodic encrypted traffic to 203.0.113.42 every ~30s (CV=0.04).",
-            evidence=["Connection count: 12", "Mean interval: 30.2s", "Interval CV: 0.04"],
+            description="Beaconing / C2 behavior detected: 192.168.1.100 sends highly periodic traffic to 203.0.113.42:443 every ~30s (interval CV=0.04, byte-size CV=0.06).",
+            evidence=[
+                "Connection count: 12",
+                "Mean interval: 30.2s",
+                "Interval CV (lower = more periodic): 0.04",
+                "Byte-size CV: 0.06 — consistent payload size, stronger C2 indicator",
+            ],
+            possible_false_positive=get_false_positive_explanations(ThreatCategory.BEACONING),
+            recommended_actions=get_recommended_actions(ThreatCategory.BEACONING),
             mitre_technique_id="T1071",
             mitre_technique_name="Application Layer Protocol",
             mitre_tactic_id="TA0011",
@@ -389,7 +410,10 @@ def run_demo_mode() -> None:
             ip_address="192.168.1.100",
             anomaly_score=0.92,
             is_anomaly=True,
-            contributing_features=["syn_packet_count=450 (mean=12)", "unique_destination_count=87 (mean=3)"],
+            contributing_features=[
+                "syn_packet_count=450 (mean=12)",
+                "unique_destination_count=87 (mean=3)",
+            ],
         ),
         AnomalyDetectionResult(ip_address="192.168.1.50", anomaly_score=0.35, is_anomaly=False),
         AnomalyDetectionResult(ip_address="192.168.1.20", anomaly_score=0.28, is_anomaly=False),
@@ -421,10 +445,11 @@ def run_demo_mode() -> None:
     )
 
     from backend.reports.report_generator import generate_report
+
     render_full_session_dashboard(session)
     report_paths = generate_report(session, "reports/")
     _save_session_to_db(session, report_paths)
-    print(f"\n[+] Demo report saved:")
+    print("\n[+] Demo report saved:")
     print(f"    JSON: {report_paths['json']}")
     print(f"    HTML: {report_paths['html']}")
     print(f"[+] Session {session.session_id} persisted to {DB_FILE_PATH}")
@@ -452,14 +477,14 @@ def run_history_command(limit: int) -> None:
         box=box.ROUNDED,
         border_style="blue",
     )
-    history_table.add_column("Session ID",    style="bold cyan",   min_width=14)
-    history_table.add_column("Timestamp",     style="dim white",   min_width=22)
-    history_table.add_column("Source",        style="dim white",   max_width=30)
-    history_table.add_column("Hosts",         justify="right",     min_width=6)
-    history_table.add_column("Alerts",        justify="right",     min_width=7)
-    history_table.add_column("Stories",       justify="right",     min_width=8)
-    history_table.add_column("Risk Score",    justify="right",     min_width=10)
-    history_table.add_column("JSON Report",   style="dim",         max_width=40)
+    history_table.add_column("Session ID", style="bold cyan", min_width=14)
+    history_table.add_column("Timestamp", style="dim white", min_width=22)
+    history_table.add_column("Source", style="dim white", max_width=30)
+    history_table.add_column("Hosts", justify="right", min_width=6)
+    history_table.add_column("Alerts", justify="right", min_width=7)
+    history_table.add_column("Stories", justify="right", min_width=8)
+    history_table.add_column("Risk Score", justify="right", min_width=10)
+    history_table.add_column("JSON Report", style="dim", max_width=40)
 
     for session_row in session_summaries:
         risk_score = session_row["total_risk_score"]
@@ -472,7 +497,9 @@ def run_history_command(limit: int) -> None:
         else:
             score_display = f"[bold green]{risk_score:.0f}[/bold green]"
 
-        source_file = session_row.get("nmap_file_path") or session_row.get("pcap_file_path") or "demo"
+        source_file = (
+            session_row.get("nmap_file_path") or session_row.get("pcap_file_path") or "demo"
+        )
         json_report = session_row.get("json_report_path") or "—"
 
         history_table.add_row(
@@ -493,6 +520,7 @@ def run_history_command(limit: int) -> None:
 
 def run_api_server() -> None:
     import uvicorn
+
     print("[*] Starting AI Cyber Fusion API server on http://localhost:8000")
     print("[*] API docs: http://localhost:8000/docs")
     uvicorn.run("backend.api.main:app", host="0.0.0.0", port=8000, reload=True)
@@ -500,8 +528,9 @@ def run_api_server() -> None:
 
 def _build_summary(host_profiles, threat_alerts, attack_stories) -> str:
     from backend.models import RiskLevel
+
     critical_count = sum(1 for p in host_profiles if p.risk_level == RiskLevel.CRITICAL)
-    high_count     = sum(1 for p in host_profiles if p.risk_level == RiskLevel.HIGH)
+    high_count = sum(1 for p in host_profiles if p.risk_level == RiskLevel.HIGH)
     if critical_count == 0 and not threat_alerts:
         return "No significant threats detected."
     parts = []
@@ -516,11 +545,24 @@ def _build_summary(host_profiles, threat_alerts, attack_stories) -> str:
     return " ".join(parts)
 
 
+_HELP_EPILOG = """
+examples:
+  python main.py demo
+  python main.py nmap   samples/nmap/network_scan.xml --ioc
+  python main.py pcap   samples/pcaps/suspicious.pcap
+  python main.py full   samples/nmap/network_scan.xml samples/pcaps/suspicious.pcap
+  python main.py explain samples/nmap/network_scan.xml 192.168.1.50
+  python main.py history --limit 20
+  python main.py api
+"""
+
+
 def build_argument_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="AI Cyber Fusion Platform — Autonomous Threat Detection",
+        prog="python main.py",
+        description="AI Cyber Fusion Platform — Autonomous Threat Detection & SOC-style Analysis",
         formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog=__doc__,
+        epilog=_HELP_EPILOG,
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
 
@@ -532,19 +574,23 @@ def build_argument_parser() -> argparse.ArgumentParser:
     pcap_parser.add_argument("pcap_file", help="Path to PCAP or PCAPNG file")
 
     full_parser = subparsers.add_parser("full", help="Full analysis: Nmap + PCAP")
-    full_parser.add_argument("xml_file",  help="Path to Nmap XML output file")
+    full_parser.add_argument("xml_file", help="Path to Nmap XML output file")
     full_parser.add_argument("pcap_file", help="Path to PCAP or PCAPNG file")
     full_parser.add_argument("--ioc", action="store_true", help="Enable IOC threat intel lookups")
 
     explain_parser = subparsers.add_parser("explain", help="AI explanation for a specific host IP")
-    explain_parser.add_argument("xml_file",   help="Path to Nmap XML output file")
+    explain_parser.add_argument("xml_file", help="Path to Nmap XML output file")
     explain_parser.add_argument("ip_address", help="IP address to explain")
 
-    subparsers.add_parser("api",  help="Start FastAPI REST server on port 8000")
+    subparsers.add_parser("api", help="Start FastAPI REST server on port 8000")
     subparsers.add_parser("demo", help="Run demo with synthetic attack scenario")
 
-    history_parser = subparsers.add_parser("history", help="List all past scan sessions from the database")
-    history_parser.add_argument("--limit", type=int, default=50, help="Maximum number of sessions to show (default: 50)")
+    history_parser = subparsers.add_parser(
+        "history", help="List all past scan sessions from the database"
+    )
+    history_parser.add_argument(
+        "--limit", type=int, default=50, help="Maximum number of sessions to show (default: 50)"
+    )
 
     return parser
 

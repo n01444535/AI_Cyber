@@ -8,22 +8,12 @@ ORM dependency is needed — only the stdlib sqlite3 module.
 
 import json
 import sqlite3
-from dataclasses import asdict
 from datetime import datetime, timezone
-from pathlib import Path
 from typing import Optional
 
 from backend.models import (
-    AttackTimelineEvent,
-    CorrelatedAttackStory,
-    HostRiskProfile,
-    IOCLookupResult,
-    RiskLevel,
     ScanSessionResult,
-    ThreatAlertRecord,
-    ThreatCategory,
 )
-
 
 DEFAULT_DB_PATH = "cyber_platform.db"
 
@@ -78,7 +68,9 @@ CREATE TABLE IF NOT EXISTS threat_alerts (
     mitre_tactic_id     TEXT    NOT NULL DEFAULT '',
     mitre_tactic_name   TEXT    NOT NULL DEFAULT '',
     timestamp           TEXT    NOT NULL DEFAULT '',
-    evidence            TEXT    NOT NULL DEFAULT '[]'
+    evidence            TEXT    NOT NULL DEFAULT '[]',
+    possible_false_positive TEXT NOT NULL DEFAULT '[]',
+    recommended_actions TEXT    NOT NULL DEFAULT '[]'
 )
 """
 
@@ -124,6 +116,11 @@ class SessionRepository:
         connection.execute("PRAGMA journal_mode = WAL")
         return connection
 
+    _ALERT_MIGRATIONS = [
+        "ALTER TABLE threat_alerts ADD COLUMN possible_false_positive TEXT NOT NULL DEFAULT '[]'",
+        "ALTER TABLE threat_alerts ADD COLUMN recommended_actions TEXT NOT NULL DEFAULT '[]'",
+    ]
+
     def _initialize_schema(self) -> None:
         with self._open_connection() as connection:
             connection.execute(_CREATE_SESSIONS_TABLE)
@@ -132,6 +129,11 @@ class SessionRepository:
             connection.execute(_CREATE_ATTACK_STORIES_TABLE)
             for index_statement in _INDEX_STATEMENTS:
                 connection.execute(index_statement)
+            for migration_sql in self._ALERT_MIGRATIONS:
+                try:
+                    connection.execute(migration_sql)
+                except sqlite3.OperationalError:
+                    pass  # Column already exists — safe to skip
 
     # ── save ───────────────────────────────────────────────────────────────────
 
@@ -209,8 +211,8 @@ class SessionRepository:
                         (session_id, alert_id, source_ip, destination_ip, threat_category,
                          risk_level, confidence_score, description, mitre_technique_id,
                          mitre_technique_name, mitre_tactic_id, mitre_tactic_name,
-                         timestamp, evidence)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                         timestamp, evidence, possible_false_positive, recommended_actions)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         session.session_id,
@@ -227,6 +229,8 @@ class SessionRepository:
                         alert.mitre_tactic_name,
                         alert.timestamp,
                         json.dumps(alert.evidence),
+                        json.dumps(alert.possible_false_positive),
+                        json.dumps(alert.recommended_actions),
                     ),
                 )
 
@@ -332,6 +336,8 @@ class SessionRepository:
         for row in rows:
             record = dict(row)
             record["evidence"] = json.loads(record["evidence"])
+            record["possible_false_positive"] = json.loads(record.get("possible_false_positive", "[]"))
+            record["recommended_actions"] = json.loads(record.get("recommended_actions", "[]"))
             result.append(record)
         return result
 
@@ -348,8 +354,8 @@ class SessionRepository:
         result = []
         for row in rows:
             record = dict(row)
-            record["involved_ips"]     = json.loads(record["involved_ips"])
-            record["mitre_tactics"]    = json.loads(record["mitre_tactics"])
+            record["involved_ips"] = json.loads(record["involved_ips"])
+            record["mitre_tactics"] = json.loads(record["mitre_tactics"])
             record["mitre_techniques"] = json.loads(record["mitre_techniques"])
             result.append(record)
         return result

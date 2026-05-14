@@ -5,7 +5,6 @@ from sklearn.preprocessing import StandardScaler
 from backend.constants import DBSCAN_EPS, DBSCAN_MIN_SAMPLES
 from backend.models import TrafficClusterRecord
 
-
 CLUSTERING_FEATURE_COLUMNS = [
     "bytes_sent",
     "bytes_received",
@@ -75,13 +74,15 @@ class TrafficClusterer:
                 if ip_address in features_by_ip
             ]
             behavior_label = _infer_cluster_behavior_label(member_feature_list, cluster.is_noise)
-            labeled_clusters.append(TrafficClusterRecord(
-                cluster_id=cluster.cluster_id,
-                member_ips=cluster.member_ips,
-                centroid_features=cluster.centroid_features,
-                cluster_label=behavior_label,
-                is_noise=cluster.is_noise,
-            ))
+            labeled_clusters.append(
+                TrafficClusterRecord(
+                    cluster_id=cluster.cluster_id,
+                    member_ips=cluster.member_ips,
+                    centroid_features=cluster.centroid_features,
+                    cluster_label=behavior_label,
+                    is_noise=cluster.is_noise,
+                )
+            )
 
         return labeled_clusters
 
@@ -127,30 +128,38 @@ def _build_cluster_records(
             col: round(cluster_feature_sums[cluster_id_int][col] / member_count, 2)
             for col in CLUSTERING_FEATURE_COLUMNS
         }
-        cluster_records.append(TrafficClusterRecord(
-            cluster_id=cluster_id_int,
-            member_ips=member_ips,
-            centroid_features=centroid_features,
-            cluster_label="",
-            is_noise=(cluster_id_int == NOISE_CLUSTER_ID),
-        ))
+        cluster_records.append(
+            TrafficClusterRecord(
+                cluster_id=cluster_id_int,
+                member_ips=member_ips,
+                centroid_features=centroid_features,
+                cluster_label="",
+                is_noise=(cluster_id_int == NOISE_CLUSTER_ID),
+            )
+        )
 
     return sorted(cluster_records, key=lambda cluster: cluster.cluster_id)
 
 
-def _infer_cluster_behavior_label(
-    member_features: list[dict], is_noise: bool
-) -> str:
+def _infer_cluster_behavior_label(member_features: list[dict], is_noise: bool) -> str:
     if is_noise:
         return "Outlier / Noise"
     if not member_features:
         return "Unknown"
 
-    avg_risky_contacts = sum(f.get("risky_port_contact_count", 0) for f in member_features) / len(member_features)
-    avg_unique_destinations = sum(f.get("unique_destination_count", 0) for f in member_features) / len(member_features)
-    avg_dns_queries = sum(f.get("dns_query_count", 0) for f in member_features) / len(member_features)
+    avg_risky_contacts = sum(f.get("risky_port_contact_count", 0) for f in member_features) / len(
+        member_features
+    )
+    avg_unique_destinations = sum(
+        f.get("unique_destination_count", 0) for f in member_features
+    ) / len(member_features)
+    avg_dns_queries = sum(f.get("dns_query_count", 0) for f in member_features) / len(
+        member_features
+    )
     avg_bytes_sent = sum(f.get("bytes_sent", 0) for f in member_features) / len(member_features)
-    avg_syn_count = sum(f.get("syn_packet_count", 0) for f in member_features) / len(member_features)
+    avg_syn_count = sum(f.get("syn_packet_count", 0) for f in member_features) / len(
+        member_features
+    )
 
     high_risky_contact_threshold = 10
     high_destination_threshold = 50

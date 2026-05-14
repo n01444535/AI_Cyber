@@ -1,4 +1,3 @@
-import os
 from pathlib import Path
 
 from backend.models import ParsedPacketRecord
@@ -11,35 +10,42 @@ def parse_pcap_file(pcap_file_path: str) -> list[ParsedPacketRecord]:
 
     try:
         from scapy.all import rdpcap
+
         raw_packets = rdpcap(pcap_file_path)
         return _extract_records_from_scapy_packets(raw_packets)
     except ImportError:
         pass
 
     try:
-        import pyshark
+        import pyshark  # noqa: F401
+
         return _extract_records_from_pyshark(pcap_file_path)
     except ImportError:
-        raise RuntimeError("Neither scapy nor pyshark is installed. Install one to parse PCAP files.")
+        raise RuntimeError(
+            "Neither scapy nor pyshark is installed. Install one to parse PCAP files."
+        )
 
 
 def _extract_records_from_scapy_packets(raw_packets) -> list[ParsedPacketRecord]:
     from scapy.layers.inet import IP, TCP, UDP, ICMP
     from scapy.layers.l2 import Ether, ARP
     from scapy.layers.dns import DNS, DNSQR
-    from scapy.layers.http import HTTP, HTTPRequest, HTTPResponse
 
     parsed_records: list[ParsedPacketRecord] = []
 
     for frame_index, raw_packet in enumerate(raw_packets):
-        record = _build_record_from_scapy_packet(raw_packet, frame_index, IP, TCP, UDP, ICMP, Ether, ARP, DNS, DNSQR)
+        record = _build_record_from_scapy_packet(
+            raw_packet, frame_index, IP, TCP, UDP, ICMP, Ether, ARP, DNS, DNSQR
+        )
         if record:
             parsed_records.append(record)
 
     return parsed_records
 
 
-def _build_record_from_scapy_packet(raw_packet, frame_index, IP, TCP, UDP, ICMP, Ether, ARP, DNS, DNSQR) -> ParsedPacketRecord | None:
+def _build_record_from_scapy_packet(
+    raw_packet, frame_index, IP, TCP, UDP, ICMP, Ether, ARP, DNS, DNSQR
+) -> ParsedPacketRecord | None:
     packet_timestamp = float(raw_packet.time)
     packet_length = len(raw_packet)
 
@@ -147,7 +153,6 @@ def _extract_tls_sni_from_scapy(raw_packet) -> str:
         # TLS ClientHello starts with 0x16 0x03 (TLS record + version)
         tls_record_type = 0x16
         tls_handshake_type_client_hello = 0x01
-        sni_extension_type = 0x0000
 
         tls_start = raw_bytes.find(bytes([tls_record_type, 0x03]))
         if tls_start == -1:
@@ -162,11 +167,11 @@ def _extract_tls_sni_from_scapy(raw_packet) -> str:
         if sni_pos == -1 or sni_pos + 9 >= len(raw_bytes):
             return ""
 
-        sni_length = int.from_bytes(raw_bytes[sni_pos + 7:sni_pos + 9], "big")
+        sni_length = int.from_bytes(raw_bytes[sni_pos + 7 : sni_pos + 9], "big")
         sni_end = sni_pos + 9 + sni_length
         if sni_end > len(raw_bytes):
             return ""
-        return raw_bytes[sni_pos + 9:sni_end].decode("ascii", errors="ignore")
+        return raw_bytes[sni_pos + 9 : sni_end].decode("ascii", errors="ignore")
     except Exception:
         return ""
 
@@ -184,7 +189,7 @@ def _extract_smb_command_from_scapy(raw_packet) -> str:
 
         smb2_pos = raw_bytes.find(smb2_magic)
         if smb2_pos != -1 and smb2_pos + 14 < len(raw_bytes):
-            smb2_command_bytes = raw_bytes[smb2_pos + 12:smb2_pos + 14]
+            smb2_command_bytes = raw_bytes[smb2_pos + 12 : smb2_pos + 14]
             smb2_command_id = int.from_bytes(smb2_command_bytes, "little")
             return f"SMBv2-cmd-{smb2_command_id}"
 

@@ -7,14 +7,12 @@ from sklearn.ensemble import IsolationForest
 from sklearn.preprocessing import StandardScaler
 
 from backend.constants import (
-    ANOMALY_CRITICAL_THRESHOLD,
     ANOMALY_HIGH_THRESHOLD,
     ISOLATION_FOREST_CONTAMINATION,
     ISOLATION_FOREST_N_ESTIMATORS,
     MIN_SAMPLES_TO_TRAIN,
 )
 from backend.models import AnomalyDetectionResult
-
 
 TRAFFIC_FEATURE_COLUMNS = [
     "bytes_sent",
@@ -88,12 +86,14 @@ class TrafficAnomalyDetector:
             contributing_features = _identify_contributing_features(
                 feature_dict, host_traffic_features, TRAFFIC_FEATURE_COLUMNS
             )
-            results.append(AnomalyDetectionResult(
-                ip_address=feature_dict.get("ip_address", "unknown"),
-                anomaly_score=anomaly_score,
-                is_anomaly=anomaly_score >= ANOMALY_HIGH_THRESHOLD,
-                contributing_features=contributing_features,
-            ))
+            results.append(
+                AnomalyDetectionResult(
+                    ip_address=feature_dict.get("ip_address", "unknown"),
+                    anomaly_score=anomaly_score,
+                    is_anomaly=anomaly_score >= ANOMALY_HIGH_THRESHOLD,
+                    contributing_features=contributing_features,
+                )
+            )
 
         return results
 
@@ -103,7 +103,9 @@ class TrafficAnomalyDetector:
         Path(model_save_path).mkdir(parents=True, exist_ok=True)
         model_file_path = os.path.join(model_save_path, "traffic_anomaly_detector.pkl")
         with open(model_file_path, "wb") as model_file:
-            pickle.dump({"model": self._isolation_forest_model, "scaler": self._feature_scaler}, model_file)
+            pickle.dump(
+                {"model": self._isolation_forest_model, "scaler": self._feature_scaler}, model_file
+            )
 
     def load_model(self, model_save_path: str) -> bool:
         model_file_path = os.path.join(model_save_path, "traffic_anomaly_detector.pkl")
@@ -157,12 +159,14 @@ class HostAnomalyDetector:
             contributing_features = _identify_contributing_features(
                 feature_dict, host_scan_features, HOST_FEATURE_COLUMNS
             )
-            results.append(AnomalyDetectionResult(
-                ip_address=feature_dict.get("ip_address", "unknown"),
-                anomaly_score=anomaly_score,
-                is_anomaly=anomaly_score >= ANOMALY_HIGH_THRESHOLD,
-                contributing_features=contributing_features,
-            ))
+            results.append(
+                AnomalyDetectionResult(
+                    ip_address=feature_dict.get("ip_address", "unknown"),
+                    anomaly_score=anomaly_score,
+                    is_anomaly=anomaly_score >= ANOMALY_HIGH_THRESHOLD,
+                    contributing_features=contributing_features,
+                )
+            )
 
         return results
 
@@ -172,7 +176,9 @@ class HostAnomalyDetector:
         Path(model_save_path).mkdir(parents=True, exist_ok=True)
         model_file_path = os.path.join(model_save_path, "host_anomaly_detector.pkl")
         with open(model_file_path, "wb") as model_file:
-            pickle.dump({"model": self._isolation_forest_model, "scaler": self._feature_scaler}, model_file)
+            pickle.dump(
+                {"model": self._isolation_forest_model, "scaler": self._feature_scaler}, model_file
+            )
 
     def load_model(self, model_save_path: str) -> bool:
         model_file_path = os.path.join(model_save_path, "host_anomaly_detector.pkl")
@@ -223,12 +229,16 @@ def _build_heuristic_anomaly_results(
     results: list[AnomalyDetectionResult] = []
     for feature_dict in feature_dicts:
         heuristic_score = _calculate_heuristic_anomaly_score(feature_dict)
-        results.append(AnomalyDetectionResult(
-            ip_address=feature_dict.get("ip_address", "unknown"),
-            anomaly_score=heuristic_score,
-            is_anomaly=heuristic_score >= ANOMALY_HIGH_THRESHOLD,
-            contributing_features=_identify_contributing_features(feature_dict, feature_dicts, column_names),
-        ))
+        results.append(
+            AnomalyDetectionResult(
+                ip_address=feature_dict.get("ip_address", "unknown"),
+                anomaly_score=heuristic_score,
+                is_anomaly=heuristic_score >= ANOMALY_HIGH_THRESHOLD,
+                contributing_features=_identify_contributing_features(
+                    feature_dict, feature_dicts, column_names
+                ),
+            )
+        )
     return results
 
 

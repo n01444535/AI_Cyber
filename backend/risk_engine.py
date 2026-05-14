@@ -1,6 +1,4 @@
 from backend.constants import (
-    ANOMALY_CRITICAL_THRESHOLD,
-    ANOMALY_HIGH_THRESHOLD,
     CRITICAL_RISK_PORTS,
     HIGH_RISK_PORTS,
     RISK_SCORE_CRITICAL_MIN,
@@ -70,7 +68,8 @@ def calculate_host_risk_profiles(
         open_port_count = len(host_record.open_ports) if host_record else 0
         critical_port_count = (
             len([p for p in host_record.open_ports if p.port_number in CRITICAL_RISK_PORTS])
-            if host_record else 0
+            if host_record
+            else 0
         )
 
         ai_explanation = _compose_ai_explanation(
@@ -82,9 +81,9 @@ def calculate_host_risk_profiles(
             risk_level=risk_level,
         )
 
-        mitre_techniques = list({
-            alert.mitre_technique_id for alert in host_alerts if alert.mitre_technique_id
-        })
+        mitre_techniques = list(
+            {alert.mitre_technique_id for alert in host_alerts if alert.mitre_technique_id}
+        )
 
         correlated_story_narrative = ""
         for story in attack_stories:
@@ -92,21 +91,23 @@ def calculate_host_risk_profiles(
                 correlated_story_narrative = story.attack_narrative
                 break
 
-        host_risk_profiles.append(HostRiskProfile(
-            ip_address=host_ip,
-            hostname=host_record.hostname if host_record else "",
-            risk_score=final_risk_score,
-            risk_level=risk_level,
-            open_port_count=open_port_count,
-            critical_port_count=critical_port_count,
-            anomaly_score=anomaly_score_value,
-            is_ml_anomaly=anomaly_result.is_anomaly if anomaly_result else False,
-            threat_alerts=host_alerts,
-            ioc_results=[ioc_result] if ioc_result else [],
-            ai_explanation=ai_explanation,
-            mitre_techniques=mitre_techniques,
-            correlated_story=correlated_story_narrative,
-        ))
+        host_risk_profiles.append(
+            HostRiskProfile(
+                ip_address=host_ip,
+                hostname=host_record.hostname if host_record else "",
+                risk_score=final_risk_score,
+                risk_level=risk_level,
+                open_port_count=open_port_count,
+                critical_port_count=critical_port_count,
+                anomaly_score=anomaly_score_value,
+                is_ml_anomaly=anomaly_result.is_anomaly if anomaly_result else False,
+                threat_alerts=host_alerts,
+                ioc_results=[ioc_result] if ioc_result else [],
+                ai_explanation=ai_explanation,
+                mitre_techniques=mitre_techniques,
+                correlated_story=correlated_story_narrative,
+            )
+        )
 
     host_risk_profiles.sort(key=lambda profile: profile.risk_score, reverse=True)
     return host_risk_profiles
@@ -125,7 +126,11 @@ def _calculate_port_risk_score(host_record: ScannedHostRecord) -> float:
     high_weight = 8
     open_port_weight = 2
 
-    raw_score = (critical_count * critical_weight) + (high_risk_count * high_weight) + (total_open * open_port_weight)
+    raw_score = (
+        (critical_count * critical_weight)
+        + (high_risk_count * high_weight)
+        + (total_open * open_port_weight)
+    )
     return min(100.0, float(raw_score))
 
 
@@ -146,17 +151,17 @@ def _calculate_traffic_behavior_score(host_alerts: list[ThreatAlertRecord]) -> f
         return 0.0
 
     category_score_map = {
-        ThreatCategory.BEACONING:         90,
-        ThreatCategory.EXFILTRATION:      85,
-        ThreatCategory.LATERAL_MOVEMENT:  85,
-        ThreatCategory.DNS_TUNNELING:     75,
-        ThreatCategory.SMB_ENUM:          70,
-        ThreatCategory.BRUTE_FORCE:       65,
-        ThreatCategory.PORT_SCAN:         50,
-        ThreatCategory.KNOWN_MALICIOUS:   80,
+        ThreatCategory.BEACONING: 90,
+        ThreatCategory.EXFILTRATION: 85,
+        ThreatCategory.LATERAL_MOVEMENT: 85,
+        ThreatCategory.DNS_TUNNELING: 75,
+        ThreatCategory.SMB_ENUM: 70,
+        ThreatCategory.BRUTE_FORCE: 65,
+        ThreatCategory.PORT_SCAN: 50,
+        ThreatCategory.KNOWN_MALICIOUS: 80,
         ThreatCategory.SUSPICIOUS_OUTBOUND: 55,
-        ThreatCategory.RECON:             45,
-        ThreatCategory.ANOMALY:           40,
+        ThreatCategory.RECON: 45,
+        ThreatCategory.ANOMALY: 40,
     }
 
     max_category_score = max(
@@ -214,9 +219,7 @@ def _compose_ai_explanation(
     alert_category_names = [alert.threat_category.value for alert in host_alerts]
     if alert_category_names:
         unique_categories = list(dict.fromkeys(alert_category_names))
-        explanation_parts.append(
-            f"Behavioral detections: {', '.join(unique_categories[:5])}."
-        )
+        explanation_parts.append(f"Behavioral detections: {', '.join(unique_categories[:5])}.")
 
     if anomaly_result and anomaly_result.is_anomaly:
         contributing = ", ".join(anomaly_result.contributing_features[:3])
