@@ -1,0 +1,48 @@
+# Secrets & environment
+.env
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+
+# OS
+.DS_Store
+
+# Virtual environments
+.venv/
+venv/
+MyEnv/
+env/
+
+# ML model binaries (trained weights, not source)
+models/*.pkl
+models/*.joblib
+
+# Generated reports (runtime output)
+reports/*.html
+reports/*.json
+reports/*.pdf
+
+# Database (runtime data)
+*.db
+*.sqlite
+*.sqlite3
+
+# Threat intel cache (runtime data)
+ioc_cache.json
+
+# Sample captures (potentially sensitive)
+samples/pcaps/*.pcap
+samples/pcaps/*.pcapng
+
+# Build artifacts
+*.egg-info/
+dist/
+build/
+
+# JS
+node_modules/
+frontend/node_modules/

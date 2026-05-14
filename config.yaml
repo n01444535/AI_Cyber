@@ -1,0 +1,60 @@
+platform:
+  name: "AI Cyber Fusion Platform"
+  version: "1.0.0"
+
+# Threat intelligence API keys (set via .env or environment variables)
+threat_intel:
+  virustotal_api_key: ""
+  abuseipdb_api_key: ""
+  otx_api_key: ""
+  request_timeout_seconds: 10
+  cache_ttl_hours: 24
+
+# Network scanner settings
+scanner:
+  default_scan_arguments: "-sV -sC -O --osscan-guess"
+  fast_scan_arguments: "-T4 -F"
+  nmap_timeout_seconds: 300
+
+# Packet analyzer settings
+packet_analyzer:
+  max_packet_count: 100000
+  live_capture_interface: "en0"
+  capture_timeout_seconds: 60
+  flow_timeout_seconds: 120
+
+# ML model settings
+ml:
+  isolation_forest_contamination: 0.10
+  isolation_forest_n_estimators: 150
+  dbscan_eps: 0.5
+  dbscan_min_samples: 3
+  random_forest_n_estimators: 100
+  random_forest_max_depth: 8
+  anomaly_score_threshold: 0.65
+  model_save_path: "models/"
+
+# Risk scoring weights (must sum to 100)
+risk_scoring:
+  weight_open_ports: 25
+  weight_threat_intel: 30
+  weight_ml_anomaly: 20
+  weight_traffic_behavior: 15
+  weight_correlation: 10
+
+# Correlation engine thresholds
+correlation:
+  min_events_for_attack_story: 2
+  time_window_minutes: 30
+  lateral_movement_min_hosts: 2
+
+# Report settings
+reports:
+  output_dir: "reports/"
+  html_template_dir: "backend/reports/templates/"
+  include_raw_data: false
+
+# Dashboard settings
+dashboard:
+  refresh_interval_seconds: 5
+  max_alerts_displayed: 50
