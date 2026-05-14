@@ -63,6 +63,24 @@ cyber/
 
 ## Installation
 
+### System dependencies
+
+Live capture (`full` mode) requires **TShark** (Wireshark CLI) or **tcpdump**, and **Nmap**.
+
+```bash
+# macOS
+brew install wireshark nmap
+tshark -v   # verify
+
+# Ubuntu / Kali / Debian
+sudo apt update
+sudo apt install tshark wireshark nmap
+tshark -v   # verify
+```
+
+> On Linux, add your user to the `wireshark` group to capture without `sudo`:
+> `sudo usermod -aG wireshark $USER` (re-login required)
+
 ### Local (venv)
 
 ```bash
@@ -109,39 +127,65 @@ This loads synthetic network data, runs the full detection pipeline, renders the
 
 ## CLI Commands
 
+| Command | Description |
+|---|---|
+| `sudo python3 main.py full` | Autonomous real-time scan (auto-detect network + interface) |
+| `python3 main.py analyze` | File-based analysis: Nmap XML and/or PCAP |
+| `python3 main.py nmap <xml>` | Analyze a saved Nmap XML file |
+| `python3 main.py pcap <pcap>` | Analyze a saved PCAP file |
+| `python3 main.py demo` | Synthetic attack scenario (no files needed) |
+| `python3 main.py explain <xml> <ip>` | AI explanation for a specific host |
+| `python3 main.py history` | Browse past scan sessions |
+| `python3 main.py api` | Start REST API on :8000 |
+
+### Real-time autonomous scan
+
 ```bash
-python main.py demo                                          # Synthetic attack scenario
-python main.py nmap   <nmap_xml>            [--ioc]         # Analyze Nmap XML scan
-python main.py pcap   <pcap_file>                           # Analyze packet capture
-python main.py full   <nmap_xml> <pcap_file> [--ioc]        # Combined Nmap + PCAP
-python main.py explain <nmap_xml> <ip_address>              # AI explanation for a host
-python main.py history [--limit N]                          # Browse past sessions
-python main.py api                                          # Start REST API on :8000
+# Auto-detect local network and interface, capture for 60s
+sudo python3 main.py full
+
+# Specify target, interface, and capture duration
+sudo python3 main.py full --target xxx.xxx.x.x/24 --interface en0 --duration 120
+
+# With threat intel IOC lookups
+sudo python3 main.py full --target xxx.xxx.x.x/24 --ioc
 ```
 
-### Examples
+Live capture requires root/sudo. The scan auto-saves Nmap XML to `data/nmap/` and PCAP to `data/pcaps/` (excluded from git).
+
+### File-based analysis
 
 ```bash
-# Demo (no input files required)
-python main.py demo
+# Analyze Nmap XML + PCAP together
+python3 main.py analyze --nmap samples/nmap/sample_scan.xml --pcap samples/pcaps/capture.pcap
 
-# Analyze a saved Nmap scan, with IOC threat intel
-python main.py nmap samples/nmap/sample_scan.xml --ioc
+# Nmap only (with IOC lookup)
+python3 main.py analyze --nmap samples/nmap/sample_scan.xml --ioc
 
-# Analyze a PCAP file
-python main.py pcap samples/pcaps/capture.pcap
+# PCAP only
+python3 main.py analyze --pcap samples/pcaps/capture.pcap
+```
 
-# Full combined analysis
-python main.py full samples/nmap/sample_scan.xml samples/pcaps/capture.pcap
+### Other commands
+
+```bash
+# Demo with synthetic attack data (no files needed)
+python3 main.py demo
+
+# Analyze saved Nmap XML directly
+python3 main.py nmap samples/nmap/sample_scan.xml --ioc
+
+# Analyze saved PCAP directly
+python3 main.py pcap samples/pcaps/capture.pcap
 
 # AI explanation for a specific host
-python main.py explain samples/nmap/sample_scan.xml 192.168.1.50
+python3 main.py explain samples/nmap/sample_scan.xml xxx.xxx.x.x
 
 # View scan history
-python main.py history --limit 20
+python3 main.py history --limit 20
 
 # Start API server (docs at http://localhost:8000/docs)
-python main.py api
+python3 main.py api
 ```
 
 ---

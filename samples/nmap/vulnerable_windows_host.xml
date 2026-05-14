@@ -1,0 +1,155 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE nmaprun>
+<nmaprun scanner="nmap" args="nmap -sV -sC -O --osscan-guess xxx.xxx.x.x/24" start="1747180800" version="7.94" xmloutputversion="1.05">
+<scaninfo type="syn" protocol="tcp" numservices="1000" services="1-1000"/>
+
+<host starttime="1747180800" endtime="1747180830">
+  <status state="up" reason="echo-reply"/>
+  <address addr="xxx.xxx.x.x" addrtype="ipv4"/>
+  <address addr="AA:BB:CC:DD:EE:01" addrtype="mac" vendor="Cisco Systems"/>
+  <hostnames><hostname name="router-gw.local" type="PTR"/></hostnames>
+  <ports>
+    <port protocol="tcp" portid="23">
+      <state state="open" reason="syn-ack"/>
+      <service name="telnet" product="" version="" extrainfo=""/>
+    </port>
+    <port protocol="tcp" portid="80">
+      <state state="open" reason="syn-ack"/>
+      <service name="http" product="Cisco IOS HTTP Server" version="12.4" extrainfo=""/>
+    </port>
+    <port protocol="udp" portid="161">
+      <state state="open" reason="udp-response"/>
+      <service name="snmp" product="Net-SNMP" version="5.7" extrainfo=""/>
+    </port>
+  </ports>
+  <os>
+    <osmatch name="Cisco IOS 12.4" accuracy="98">
+      <osclass type="router" vendor="Cisco" osfamily="IOS" osgen="12.X"/>
+    </osmatch>
+  </os>
+</host>
+
+<host starttime="1747180831" endtime="1747180870">
+  <status state="up" reason="echo-reply"/>
+  <address addr="xxx.xxx.x.x" addrtype="ipv4"/>
+  <address addr="00:50:56:AA:BB:01" addrtype="mac" vendor="VMware"/>
+  <hostnames><hostname name="srv-web-01.local" type="PTR"/></hostnames>
+  <ports>
+    <port protocol="tcp" portid="80">
+      <state state="open" reason="syn-ack"/>
+      <service name="http" product="Microsoft IIS httpd" version="10.0" extrainfo=""/>
+      <script id="http-title" output="IIS Windows Server"/>
+    </port>
+    <port protocol="tcp" portid="135">
+      <state state="open" reason="syn-ack"/>
+      <service name="msrpc" product="Microsoft Windows RPC" version="" extrainfo=""/>
+    </port>
+    <port protocol="tcp" portid="139">
+      <state state="open" reason="syn-ack"/>
+      <service name="netbios-ssn" product="Microsoft Windows netbios-ssn" version="" extrainfo=""/>
+    </port>
+    <port protocol="tcp" portid="445">
+      <state state="open" reason="syn-ack"/>
+      <service name="microsoft-ds" product="Windows Server 2019" version="" extrainfo=""/>
+      <script id="smb-security-mode" output="account_used: guest&#xa;authentication_level: user&#xa;challenge_response: supported&#xa;message_signing: disabled"/>
+      <script id="smb2-security-mode" output="3.1.1: &#xa;  Message signing enabled but not required"/>
+    </port>
+    <port protocol="tcp" portid="3389">
+      <state state="open" reason="syn-ack"/>
+      <service name="ms-wbt-server" product="" version="" extrainfo=""/>
+      <script id="rdp-enum-encryption" output="Security layer&#xa;  CredSSP (NLA): SUCCESS"/>
+    </port>
+    <port protocol="tcp" portid="443">
+      <state state="open" reason="syn-ack"/>
+      <service name="ssl/http" product="Microsoft IIS httpd" version="10.0" extrainfo=""/>
+    </port>
+    <port protocol="tcp" portid="5985">
+      <state state="open" reason="syn-ack"/>
+      <service name="http" product="Microsoft HTTPAPI httpd" version="2.0" extrainfo="SSDP/UPnP"/>
+    </port>
+  </ports>
+  <os>
+    <osmatch name="Microsoft Windows Server 2019" accuracy="99">
+      <osclass type="general purpose" vendor="Microsoft" osfamily="Windows" osgen="2019"/>
+    </osmatch>
+  </os>
+</host>
+
+<host starttime="1747180871" endtime="1747180910">
+  <status state="up" reason="echo-reply"/>
+  <address addr="xxx.xxx.x.x" addrtype="ipv4"/>
+  <address addr="00:50:56:AA:BB:02" addrtype="mac" vendor="VMware"/>
+  <hostnames><hostname name="db-server.local" type="PTR"/></hostnames>
+  <ports>
+    <port protocol="tcp" portid="22">
+      <state state="open" reason="syn-ack"/>
+      <service name="ssh" product="OpenSSH" version="8.9p1 Ubuntu 3ubuntu0.6" extrainfo="Ubuntu Linux; protocol 2.0"/>
+      <script id="ssh-hostkey" output="3072 aa:bb:cc:dd:ee:ff:00:11:22:33:44:55:66:77:88:99:aa (RSA)"/>
+    </port>
+    <port protocol="tcp" portid="3306">
+      <state state="open" reason="syn-ack"/>
+      <service name="mysql" product="MySQL" version="8.0.36" extrainfo="Protocol 10"/>
+      <script id="mysql-info" output="Protocol: 10&#xa;Version: 8.0.36&#xa;Capabilities: SHORT_PASSWORD"/>
+    </port>
+    <port protocol="tcp" portid="5432">
+      <state state="open" reason="syn-ack"/>
+      <service name="postgresql" product="PostgreSQL DB" version="14.11" extrainfo=""/>
+    </port>
+    <port protocol="tcp" portid="27017">
+      <state state="open" reason="syn-ack"/>
+      <service name="mongod" product="MongoDB" version="6.0.15" extrainfo=""/>
+      <script id="mongodb-info" output="MongoDB Build info&#xa;  version: 6.0.15&#xa;  maxBsonObjectSize: 16777216"/>
+    </port>
+    <port protocol="tcp" portid="6379">
+      <state state="open" reason="syn-ack"/>
+      <service name="redis" product="Redis key-value store" version="7.2.4" extrainfo=""/>
+      <script id="redis-info" output="# Server&#xa;redis_version:7.2.4&#xa;# Keyspace&#xa;db0:keys=14287"/>
+    </port>
+    <port protocol="tcp" portid="9200">
+      <state state="open" reason="syn-ack"/>
+      <service name="http" product="Elasticsearch REST API" version="8.13.0" extrainfo=""/>
+    </port>
+  </ports>
+  <os>
+    <osmatch name="Linux 5.15 - 6.2" accuracy="95">
+      <osclass type="general purpose" vendor="Linux" osfamily="Linux" osgen="5.X"/>
+    </osmatch>
+  </os>
+</host>
+
+<host starttime="1747180911" endtime="1747180945">
+  <status state="up" reason="echo-reply"/>
+  <address addr="xxx.xxx.x.x" addrtype="ipv4"/>
+  <address addr="00:50:56:AA:BB:03" addrtype="mac" vendor="VMware"/>
+  <hostnames><hostname name="workstation-100.local" type="PTR"/></hostnames>
+  <ports>
+    <port protocol="tcp" portid="135">
+      <state state="open" reason="syn-ack"/>
+      <service name="msrpc" product="Microsoft Windows RPC" version="" extrainfo=""/>
+    </port>
+    <port protocol="tcp" portid="139">
+      <state state="open" reason="syn-ack"/>
+      <service name="netbios-ssn" product="Microsoft Windows netbios-ssn" version="" extrainfo=""/>
+    </port>
+    <port protocol="tcp" portid="445">
+      <state state="open" reason="syn-ack"/>
+      <service name="microsoft-ds" product="Windows 10" version="" extrainfo=""/>
+      <script id="smb-security-mode" output="account_used: guest&#xa;authentication_level: user&#xa;challenge_response: supported&#xa;message_signing: disabled"/>
+    </port>
+    <port protocol="tcp" portid="3389">
+      <state state="open" reason="syn-ack"/>
+      <service name="ms-wbt-server" product="" version="" extrainfo=""/>
+    </port>
+  </ports>
+  <os>
+    <osmatch name="Microsoft Windows 10 21H2" accuracy="97">
+      <osclass type="general purpose" vendor="Microsoft" osfamily="Windows" osgen="10"/>
+    </osmatch>
+  </os>
+</host>
+
+<runstats>
+  <finished time="1747180946" timestr="Wed May 14 00:02:26 2026" elapsed="146.10" summary="Nmap done at Wed May 14 00:02:26 2026; 4 IP addresses (4 hosts up) scanned in 146.10 seconds" exit="success"/>
+  <hosts up="4" down="252" total="256"/>
+</runstats>
+</nmaprun>

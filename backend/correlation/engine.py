@@ -1,8 +1,10 @@
 import uuid
 from collections import defaultdict
+from datetime import datetime
 
 from backend.constants import (
     C2_BEACONING_STORY_SCORE,
+    CORRELATION_TIME_WINDOW_MINUTES,
     EXFIL_STORY_SCORE,
     LATERAL_MOVEMENT_STORY_SCORE,
     MIN_EVENTS_FOR_STORY,
@@ -39,6 +41,22 @@ def correlate_alerts_into_stories(
 
     attack_stories.sort(key=lambda story: story.overall_risk_score, reverse=True)
     return attack_stories
+
+
+def _alerts_span_within_window(alerts: list) -> bool:
+    """Return True if all alerts with parseable timestamps fall within the correlation window."""
+    timestamps = []
+    for alert in alerts:
+        if not alert.timestamp:
+            continue
+        try:
+            timestamps.append(datetime.fromisoformat(alert.timestamp).timestamp())
+        except ValueError:
+            continue
+    if len(timestamps) < 2:
+        return True
+    span_minutes = (max(timestamps) - min(timestamps)) / 60
+    return span_minutes <= CORRELATION_TIME_WINDOW_MINUTES
 
 
 def _group_alerts_by_source_ip(
@@ -102,6 +120,9 @@ def _try_build_lateral_movement_story(
         or a.threat_category == ThreatCategory.BRUTE_FORCE
     ]
 
+    if not _alerts_span_within_window(supporting_alerts):
+        return None
+
     timeline_events = _build_timeline_events_from_alerts(supporting_alerts)
     all_involved_ips = _collect_all_involved_ips(supporting_alerts)
 
@@ -140,6 +161,9 @@ def _try_build_c2_beaconing_story(
         for a in ip_alerts
         if a.threat_category in {ThreatCategory.BEACONING, ThreatCategory.SUSPICIOUS_OUTBOUND}
     ]
+
+    if not _alerts_span_within_window(supporting_alerts):
+        return None
 
     timeline_events = _build_timeline_events_from_alerts(supporting_alerts)
     all_involved_ips = _collect_all_involved_ips(supporting_alerts)
@@ -193,6 +217,9 @@ def _try_build_exfiltration_story(
         }
     ]
 
+    if not _alerts_span_within_window(supporting_alerts):
+        return None
+
     channels_used = []
     if has_exfil:
         channels_used.append("large outbound data transfer")
@@ -244,6 +271,9 @@ def _try_build_reconnaissance_story(
         return None
 
     supporting_alerts = [a for a in ip_alerts if a.threat_category in recon_signals]
+
+    if not _alerts_span_within_window(supporting_alerts):
+        return None
 
     narrative = (
         f"{source_ip} is conducting active network reconnaissance. "

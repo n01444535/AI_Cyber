@@ -38,6 +38,9 @@ ioc_cache.json
 samples/pcaps/*.pcap
 samples/pcaps/*.pcapng
 
+# Live scan output (runtime data — may contain real network info)
+data/
+
 # Build artifacts
 *.egg-info/
 dist/

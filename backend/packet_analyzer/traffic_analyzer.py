@@ -155,6 +155,8 @@ def _detect_port_scans(packet_records: list[ParsedPacketRecord]) -> list[ThreatA
                         mitre_tactic_id=MITRE_TACTIC_RECON,
                         mitre_tactic_name="Reconnaissance",
                         timestamp=datetime.now(timezone.utc).isoformat(),
+                        protocol="TCP",
+                        packet_count=len([p for p in syn_packets if p.source_ip == scanner_ip]),
                     )
                 )
 
@@ -222,6 +224,16 @@ def _detect_beaconing_behavior(network_flows: list[NetworkFlowRecord]) -> list[T
                 mitre_tactic_id=MITRE_TACTIC_C2,
                 mitre_tactic_name="Command and Control",
                 timestamp=datetime.now(timezone.utc).isoformat(),
+                protocol=pair_flows[0].protocol if pair_flows else "",
+                dest_port=dest_port,
+                first_seen=datetime.fromtimestamp(
+                    min(f.first_seen for f in pair_flows), tz=timezone.utc
+                ).isoformat(),
+                last_seen=datetime.fromtimestamp(
+                    max(f.last_seen for f in pair_flows), tz=timezone.utc
+                ).isoformat(),
+                packet_count=sum(f.packet_count for f in pair_flows),
+                flow_count=len(pair_flows),
             )
         )
 
@@ -316,6 +328,9 @@ def _detect_dns_tunneling(packet_records: list[ParsedPacketRecord]) -> list[Thre
                     mitre_tactic_id=MITRE_TACTIC_C2,
                     mitre_tactic_name="Command and Control",
                     timestamp=datetime.now(timezone.utc).isoformat(),
+                    protocol="UDP",
+                    dest_port=53,
+                    packet_count=len(bucket_packets),
                 )
             )
 
@@ -428,6 +443,14 @@ def _detect_data_exfiltration(network_flows: list[NetworkFlowRecord]) -> list[Th
                 mitre_tactic_id=MITRE_TACTIC_EXFILTRATION,
                 mitre_tactic_name="Exfiltration",
                 timestamp=datetime.now(timezone.utc).isoformat(),
+                first_seen=datetime.fromtimestamp(
+                    min(f.first_seen for f in outbound_flows), tz=timezone.utc
+                ).isoformat() if outbound_flows else "",
+                last_seen=datetime.fromtimestamp(
+                    max(f.last_seen for f in outbound_flows), tz=timezone.utc
+                ).isoformat() if outbound_flows else "",
+                packet_count=sum(f.packet_count for f in outbound_flows),
+                flow_count=outbound_flow_count,
             )
         )
 
@@ -476,6 +499,16 @@ def _detect_brute_force_attempts(network_flows: list[NetworkFlowRecord]) -> list
                     mitre_tactic_id=MITRE_TACTIC_RECON,
                     mitre_tactic_name="Credential Access",
                     timestamp=datetime.now(timezone.utc).isoformat(),
+                    protocol="TCP",
+                    dest_port=dest_port,
+                    first_seen=datetime.fromtimestamp(
+                        min(f.first_seen for f in auth_flows), tz=timezone.utc
+                    ).isoformat(),
+                    last_seen=datetime.fromtimestamp(
+                        max(f.last_seen for f in auth_flows), tz=timezone.utc
+                    ).isoformat(),
+                    packet_count=sum(f.packet_count for f in auth_flows),
+                    flow_count=len(auth_flows),
                 )
             )
 
@@ -518,6 +551,9 @@ def _detect_smb_enumeration(packet_records: list[ParsedPacketRecord]) -> list[Th
                     mitre_tactic_id=MITRE_TACTIC_LATERAL_MOVE,
                     mitre_tactic_name="Lateral Movement",
                     timestamp=datetime.now(timezone.utc).isoformat(),
+                    protocol="TCP",
+                    dest_port=445,
+                    packet_count=len(smb_packets),
                 )
             )
 
@@ -564,6 +600,11 @@ def _detect_lateral_movement(network_flows: list[NetworkFlowRecord]) -> list[Thr
                     mitre_tactic_id=MITRE_TACTIC_LATERAL_MOVE,
                     mitre_tactic_name="Lateral Movement",
                     timestamp=datetime.now(timezone.utc).isoformat(),
+                    protocol="TCP",
+                    flow_count=len(
+                        [f for f in network_flows
+                         if f.source_ip == source_ip and f.destination_port in REMOTE_ACCESS_PORTS]
+                    ),
                 )
             )
 

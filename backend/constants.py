@@ -183,3 +183,10 @@ SCRIPT_OUTPUT_MAX_LENGTH = 140
 
 UNCOMMON_PORT_MIN = 1024
 EPHEMERAL_PORT_MIN = 49152
+
+# ── Live scan / capture ────────────────────────────────────────────────────────
+
+NMAP_DEFAULT_SCAN_ARGS = "-sV -sC"
+NMAP_OUTPUT_DIR = "data/nmap"
+CAPTURE_DEFAULT_DURATION_SECONDS = 60
+CAPTURE_OUTPUT_DIR = "data/pcaps"

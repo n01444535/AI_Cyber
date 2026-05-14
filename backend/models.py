@@ -131,6 +131,13 @@ class ThreatAlertRecord:
     mitre_tactic_name: str = ""
     timestamp: str = ""
     raw_event_ids: list[str] = field(default_factory=list)
+    # Structured evidence context for SOC triage
+    protocol: str = ""
+    dest_port: int = 0
+    first_seen: str = ""
+    last_seen: str = ""
+    packet_count: int = 0
+    flow_count: int = 0
 
 
 @dataclass

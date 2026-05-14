@@ -2,13 +2,15 @@
 """
 AI Cyber Fusion Platform — Autonomous Threat Detection & SOC-style Analysis
 
-  python main.py demo                              # Run with synthetic attack data
-  python main.py nmap   <nmap_xml>   [--ioc]      # Analyze Nmap XML scan
-  python main.py pcap   <pcap_file>               # Analyze packet capture
-  python main.py full   <nmap_xml>   <pcap_file>  # Combined Nmap + PCAP analysis
-  python main.py explain <nmap_xml>  <ip_address> # AI explanation for one host
-  python main.py history [--limit N]              # Browse past scan sessions
-  python main.py api                              # Start REST API on :8000
+  sudo python3 main.py full [--target CIDR] [--interface IF] [--duration S] [--ioc]
+  python3 main.py analyze   --nmap <xml> [--pcap <pcap>] [--ioc]
+  python3 main.py analyze   --pcap <pcap>
+  python3 main.py nmap      <nmap_xml>   [--ioc]
+  python3 main.py pcap      <pcap_file>
+  python3 main.py demo
+  python3 main.py explain   <nmap_xml>  <ip_address>
+  python3 main.py history   [--limit N]
+  python3 main.py api
 """
 
 import argparse
@@ -165,7 +167,17 @@ def run_pcap_analysis(pcap_file_path: str) -> None:
     print(f"[+] Session {session.session_id} persisted to {DB_FILE_PATH}")
 
 
-def run_full_analysis(nmap_xml_path: str, pcap_file_path: str, enable_ioc: bool) -> None:
+def run_analyze_files(nmap_xml_path: str | None, pcap_file_path: str | None, enable_ioc: bool) -> None:
+    if nmap_xml_path and not pcap_file_path:
+        run_nmap_analysis(nmap_xml_path, enable_ioc=enable_ioc)
+        return
+    if pcap_file_path and not nmap_xml_path:
+        run_pcap_analysis(pcap_file_path)
+        return
+    _run_combined_analysis(nmap_xml_path, pcap_file_path, enable_ioc)
+
+
+def _run_combined_analysis(nmap_xml_path: str, pcap_file_path: str, enable_ioc: bool) -> None:
     from backend.correlation.engine import correlate_alerts_into_stories
     from backend.ml.anomaly_detector import HostAnomalyDetector, TrafficAnomalyDetector
     from backend.models import ScanSessionResult
@@ -181,7 +193,7 @@ def run_full_analysis(nmap_xml_path: str, pcap_file_path: str, enable_ioc: bool)
     from backend.threat_intel.ioc_lookup import IOCLookupService, extract_unique_external_ips
     from frontend.dashboard import render_full_session_dashboard
 
-    print(f"[*] Full analysis: {nmap_xml_path} + {pcap_file_path}")
+    print(f"[*] Analyzing: {nmap_xml_path} + {pcap_file_path}")
 
     scanned_hosts = parse_nmap_xml_file(nmap_xml_path)
     print(f"[+] Nmap: {len(scanned_hosts)} hosts.")
@@ -249,6 +261,49 @@ def run_full_analysis(nmap_xml_path: str, pcap_file_path: str, enable_ioc: bool)
     print(f"[+] Session {session.session_id} persisted to {DB_FILE_PATH}")
 
 
+def run_full_autonomous(
+    target: str | None,
+    interface: str | None,
+    duration: int,
+    enable_ioc: bool,
+) -> None:
+    from concurrent.futures import ThreadPoolExecutor
+
+    from backend.packet_analyzer.live_capture import (
+        capture_live_traffic,
+        detect_default_interface,
+        detect_local_network,
+    )
+    from backend.scanners.nmap_runner import run_nmap_scan
+
+    resolved_target = target or detect_local_network()
+    resolved_interface = interface or detect_default_interface()
+
+    print(f"[*] Target network  : {resolved_target}")
+    print(f"[*] Interface       : {resolved_interface}")
+    print(f"[*] Capture duration: {duration}s")
+    print("[*] Running Nmap scan and live capture concurrently...")
+
+    xml_path: list[str] = [None]
+    pcap_path: list[str] = [None]
+
+    def do_nmap_scan() -> None:
+        xml_path[0] = run_nmap_scan(resolved_target)
+        print(f"[+] Nmap complete → {xml_path[0]}")
+
+    def do_live_capture() -> None:
+        pcap_path[0] = capture_live_traffic(resolved_interface, duration)
+        print(f"[+] Capture complete → {pcap_path[0]}")
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        nmap_future = pool.submit(do_nmap_scan)
+        capture_future = pool.submit(do_live_capture)
+        nmap_future.result()
+        capture_future.result()
+
+    _run_combined_analysis(xml_path[0], pcap_path[0], enable_ioc)
+
+
 def run_host_explanation(nmap_xml_path: str, target_ip: str) -> None:
     from backend.ml.anomaly_detector import HostAnomalyDetector
     from backend.models import ScanSessionResult
@@ -305,7 +360,7 @@ def run_demo_mode() -> None:
 
     demo_hosts = [
         ScannedHostRecord(
-            ip_address="192.168.1.50",
+            ip_address="xxx.xxx.x.x",
             hostname="srv-web-01",
             operating_system="Windows Server 2019",
             mac_address="00:50:56:aa:bb:01",
@@ -318,7 +373,7 @@ def run_demo_mode() -> None:
             scan_timestamp=datetime.now(timezone.utc).isoformat(),
         ),
         ScannedHostRecord(
-            ip_address="192.168.1.20",
+            ip_address="xxx.xxx.x.x",
             hostname="db-server",
             operating_system="Ubuntu 22.04",
             mac_address="00:50:56:aa:bb:02",
@@ -333,7 +388,7 @@ def run_demo_mode() -> None:
             scan_timestamp=datetime.now(timezone.utc).isoformat(),
         ),
         ScannedHostRecord(
-            ip_address="10.0.0.1",
+            ip_address="xxx.xxx.x.x",
             hostname="router-gw",
             operating_system="Cisco IOS",
             mac_address="aa:bb:cc:dd:ee:ff",
@@ -349,12 +404,12 @@ def run_demo_mode() -> None:
     demo_alerts = [
         ThreatAlertRecord(
             alert_id="a1b2c3d4",
-            source_ip="192.168.1.100",
+            source_ip="xxx.xxx.x.x",
             destination_ip="multiple",
             threat_category=ThreatCategory.PORT_SCAN,
             risk_level=RiskLevel.HIGH,
             confidence_score=0.92,
-            description="Port scan: 192.168.1.100 probed 87 unique ports in 60s.",
+            description="Port scan: xxx.xxx.x.x probed 87 unique ports in 60s.",
             evidence=["Unique ports: 87", "SYN packets without ACK", "Time window: 60s"],
             possible_false_positive=get_false_positive_explanations(ThreatCategory.PORT_SCAN),
             recommended_actions=get_recommended_actions(ThreatCategory.PORT_SCAN),
@@ -366,12 +421,12 @@ def run_demo_mode() -> None:
         ),
         ThreatAlertRecord(
             alert_id="e5f6g7h8",
-            source_ip="192.168.1.100",
-            destination_ip="192.168.1.50 (3 hosts)",
+            source_ip="xxx.xxx.x.x",
+            destination_ip="xxx.xxx.x.x (3 hosts)",
             threat_category=ThreatCategory.SMB_ENUM,
             risk_level=RiskLevel.HIGH,
             confidence_score=0.88,
-            description="SMB enumeration: 192.168.1.100 sent 45 SMB packets to 3 hosts.",
+            description="SMB enumeration: xxx.xxx.x.x sent 45 SMB packets to 3 hosts.",
             evidence=["SMB packet count: 45", "Unique targets: 3", "Protocols: SMB1, SMB2"],
             possible_false_positive=get_false_positive_explanations(ThreatCategory.SMB_ENUM),
             recommended_actions=get_recommended_actions(ThreatCategory.SMB_ENUM),
@@ -383,12 +438,12 @@ def run_demo_mode() -> None:
         ),
         ThreatAlertRecord(
             alert_id="i9j0k1l2",
-            source_ip="192.168.1.100",
-            destination_ip="203.0.113.42",
+            source_ip="xxx.xxx.x.x",
+            destination_ip="xxx.xxx.x.x",
             threat_category=ThreatCategory.BEACONING,
             risk_level=RiskLevel.CRITICAL,
             confidence_score=0.95,
-            description="Beaconing / C2 behavior detected: 192.168.1.100 sends highly periodic traffic to 203.0.113.42:443 every ~30s (interval CV=0.04, byte-size CV=0.06).",
+            description="Beaconing / C2 behavior detected: xxx.xxx.x.x sends highly periodic traffic to xxx.xxx.x.x:443 every ~30s (interval CV=0.04, byte-size CV=0.06).",
             evidence=[
                 "Connection count: 12",
                 "Mean interval: 30.2s",
@@ -407,7 +462,7 @@ def run_demo_mode() -> None:
 
     demo_anomaly_results = [
         AnomalyDetectionResult(
-            ip_address="192.168.1.100",
+            ip_address="xxx.xxx.x.x",
             anomaly_score=0.92,
             is_anomaly=True,
             contributing_features=[
@@ -415,8 +470,8 @@ def run_demo_mode() -> None:
                 "unique_destination_count=87 (mean=3)",
             ],
         ),
-        AnomalyDetectionResult(ip_address="192.168.1.50", anomaly_score=0.35, is_anomaly=False),
-        AnomalyDetectionResult(ip_address="192.168.1.20", anomaly_score=0.28, is_anomaly=False),
+        AnomalyDetectionResult(ip_address="xxx.xxx.x.x", anomaly_score=0.35, is_anomaly=False),
+        AnomalyDetectionResult(ip_address="xxx.xxx.x.x", anomaly_score=0.28, is_anomaly=False),
     ]
 
     attack_stories = correlate_alerts_into_stories(demo_alerts)
@@ -453,6 +508,60 @@ def run_demo_mode() -> None:
     print(f"    JSON: {report_paths['json']}")
     print(f"    HTML: {report_paths['html']}")
     print(f"[+] Session {session.session_id} persisted to {DB_FILE_PATH}")
+
+
+def run_baseline_command(pcap_path: str, output_path: str) -> None:
+    from backend.baseline.baseline_builder import build_baseline_from_pcap
+
+    print(f"[*] Building baseline from: {pcap_path}")
+    baseline = build_baseline_from_pcap(pcap_path, output_path)
+    print(f"[+] Baseline built from {baseline['host_count']} hosts → {output_path}")
+    print(f"    Global mean bytes_sent : {baseline['global']['bytes_sent']['mean']:,.0f}")
+    print(f"    Global mean unique_dsts: {baseline['global']['unique_destination_count']['mean']:.1f}")
+
+
+def run_compare_command(pcap_path: str, baseline_path: str) -> None:
+    from backend.baseline.baseline_compare import compare_pcap_to_baseline
+    from rich.console import Console
+    from rich.table import Table
+    from rich import box
+
+    console = Console()
+    print(f"[*] Comparing: {pcap_path}")
+    print(f"[*] Baseline : {baseline_path}")
+    deviations = compare_pcap_to_baseline(pcap_path, baseline_path)
+
+    if not deviations:
+        console.print("[green][+] No significant deviations detected vs baseline.[/green]")
+        return
+
+    deviation_table = Table(
+        title=f"Baseline Deviations — {len(deviations)} finding(s)",
+        box=box.ROUNDED,
+        border_style="yellow",
+    )
+    deviation_table.add_column("Host IP", style="bold cyan", min_width=15)
+    deviation_table.add_column("Metric", style="white", min_width=28)
+    deviation_table.add_column("Observed", justify="right", min_width=14)
+    deviation_table.add_column("Baseline Mean", justify="right", min_width=14)
+    deviation_table.add_column("× Threshold", justify="right", min_width=12)
+
+    for finding in deviations:
+        factor = finding["deviation_factor"]
+        factor_display = (
+            f"[bold red]{factor:.1f}×[/bold red]"
+            if factor >= 5
+            else f"[bold yellow]{factor:.1f}×[/bold yellow]"
+        )
+        deviation_table.add_row(
+            finding["host_ip"],
+            finding["label"],
+            f"{finding['observed_value']:,.0f}",
+            f"{finding['baseline_mean']:,.0f}",
+            factor_display,
+        )
+
+    console.print(deviation_table)
 
 
 def run_history_command(limit: int) -> None:
@@ -547,13 +656,19 @@ def _build_summary(host_profiles, threat_alerts, attack_stories) -> str:
 
 _HELP_EPILOG = """
 examples:
-  python main.py demo
-  python main.py nmap   samples/nmap/network_scan.xml --ioc
-  python main.py pcap   samples/pcaps/suspicious.pcap
-  python main.py full   samples/nmap/network_scan.xml samples/pcaps/suspicious.pcap
-  python main.py explain samples/nmap/network_scan.xml 192.168.1.50
-  python main.py history --limit 20
-  python main.py api
+  sudo python3 main.py full
+  sudo python3 main.py full --target xxx.xxx.x.x/24 --interface en0 --duration 120 --ioc
+  python3 main.py analyze --nmap samples/nmap/sample_scan.xml --pcap samples/pcaps/capture.pcap
+  python3 main.py analyze --nmap samples/nmap/sample_scan.xml --ioc
+  python3 main.py analyze --pcap samples/pcaps/capture.pcap
+  python3 main.py nmap   samples/nmap/sample_scan.xml --ioc
+  python3 main.py pcap   samples/pcaps/capture.pcap
+  python3 main.py demo
+  python3 main.py explain samples/nmap/sample_scan.xml xxx.xxx.x.x
+  python3 main.py baseline samples/pcaps/normal_traffic.pcap --output baseline.json
+  python3 main.py compare  samples/pcaps/suspicious.pcap    --baseline baseline.json
+  python3 main.py history --limit 20
+  python3 main.py api
 """
 
 
@@ -573,10 +688,31 @@ def build_argument_parser() -> argparse.ArgumentParser:
     pcap_parser = subparsers.add_parser("pcap", help="Analyze PCAP traffic file")
     pcap_parser.add_argument("pcap_file", help="Path to PCAP or PCAPNG file")
 
-    full_parser = subparsers.add_parser("full", help="Full analysis: Nmap + PCAP")
-    full_parser.add_argument("xml_file", help="Path to Nmap XML output file")
-    full_parser.add_argument("pcap_file", help="Path to PCAP or PCAPNG file")
+    full_parser = subparsers.add_parser(
+        "full", help="Autonomous real-time scan: detect network, run Nmap, capture traffic"
+    )
+    full_parser.add_argument(
+        "--target", metavar="CIDR",
+        help="Target network CIDR (default: auto-detect local /24)",
+    )
+    full_parser.add_argument(
+        "--interface", metavar="IF",
+        help="Network interface for live capture (default: auto-detect)",
+    )
+    full_parser.add_argument(
+        "--duration", type=int, default=60, metavar="SECONDS",
+        help="Packet capture duration in seconds (default: 60)",
+    )
     full_parser.add_argument("--ioc", action="store_true", help="Enable IOC threat intel lookups")
+
+    analyze_parser = subparsers.add_parser(
+        "analyze", help="File-based analysis: Nmap XML and/or PCAP"
+    )
+    analyze_parser.add_argument("--nmap", metavar="XML_FILE", help="Path to Nmap XML output file")
+    analyze_parser.add_argument("--pcap", metavar="PCAP_FILE", help="Path to PCAP or PCAPNG file")
+    analyze_parser.add_argument(
+        "--ioc", action="store_true", help="Enable IOC threat intel lookups"
+    )
 
     explain_parser = subparsers.add_parser("explain", help="AI explanation for a specific host IP")
     explain_parser.add_argument("xml_file", help="Path to Nmap XML output file")
@@ -584,6 +720,24 @@ def build_argument_parser() -> argparse.ArgumentParser:
 
     subparsers.add_parser("api", help="Start FastAPI REST server on port 8000")
     subparsers.add_parser("demo", help="Run demo with synthetic attack scenario")
+
+    baseline_parser = subparsers.add_parser(
+        "baseline", help="Build a traffic baseline from a normal-traffic PCAP"
+    )
+    baseline_parser.add_argument("pcap_file", help="Path to normal-traffic PCAP file")
+    baseline_parser.add_argument(
+        "--output", metavar="JSON_FILE", default="baseline.json",
+        help="Output path for the baseline JSON (default: baseline.json)",
+    )
+
+    compare_parser = subparsers.add_parser(
+        "compare", help="Compare a PCAP against a saved baseline to detect deviations"
+    )
+    compare_parser.add_argument("pcap_file", help="Path to PCAP file to compare")
+    compare_parser.add_argument(
+        "--baseline", metavar="JSON_FILE", default="baseline.json",
+        help="Path to baseline JSON produced by 'baseline' command (default: baseline.json)",
+    )
 
     history_parser = subparsers.add_parser(
         "history", help="List all past scan sessions from the database"
@@ -604,13 +758,27 @@ def main() -> None:
     elif args.command == "pcap":
         run_pcap_analysis(args.pcap_file)
     elif args.command == "full":
-        run_full_analysis(args.xml_file, args.pcap_file, enable_ioc=args.ioc)
+        run_full_autonomous(
+            target=args.target,
+            interface=args.interface,
+            duration=args.duration,
+            enable_ioc=args.ioc,
+        )
+    elif args.command == "analyze":
+        if not args.nmap and not args.pcap:
+            print("[!] analyze requires at least one of --nmap or --pcap.")
+            return
+        run_analyze_files(args.nmap, args.pcap, enable_ioc=args.ioc)
     elif args.command == "explain":
         run_host_explanation(args.xml_file, args.ip_address)
     elif args.command == "api":
         run_api_server()
     elif args.command == "demo":
         run_demo_mode()
+    elif args.command == "baseline":
+        run_baseline_command(args.pcap_file, args.output)
+    elif args.command == "compare":
+        run_compare_command(args.pcap_file, args.baseline)
     elif args.command == "history":
         run_history_command(limit=args.limit)
 
