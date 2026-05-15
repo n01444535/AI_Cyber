@@ -149,9 +149,20 @@ sudo python3 main.py full --target xxx.xxx.x.x/24 --interface en0 --duration 120
 
 # With threat intel IOC lookups
 sudo python3 main.py full --target xxx.xxx.x.x/24 --ioc
+
+# Disable scanner false-positive suppression (include self-generated alerts in scoring)
+sudo python3 main.py full --include-self-alerts
 ```
 
 Live capture requires root/sudo. The scan auto-saves Nmap XML to `data/nmap/` and PCAP to `data/pcaps/` (excluded from git).
+
+### Cancelling a scan
+
+Press **Ctrl+C** at any time, or type **`q`** + Enter, to cancel gracefully:
+
+```
+[!] Cancelled by user.
+```
 
 ### File-based analysis
 
@@ -227,6 +238,34 @@ Beaconing + Encrypted Outbound
 
 Port Scan + Lateral Movement + Large Outbound Transfer
      = Full APT Kill Chain Detected
+```
+
+---
+
+## False Positive Handling
+
+When `full` mode runs, the local machine performing the Nmap scan generates SYN traffic that looks identical to a port scan. Without suppression, the scanner host itself would be flagged as **High Risk** — a classic false positive.
+
+**How it works:**
+
+- On `full` mode start, the scanner's local IP is detected automatically.
+- After traffic analysis, alerts are split into **active** and **suppressed** buckets.
+- Alerts matching `Port Scan` or `Reconnaissance` from the scanner host IP, within the scan time window (+ 60 s grace), are **downgraded to Informational** and excluded from risk scoring.
+- Dangerous categories (`Beaconing / C2`, `Exfiltration`, `Brute Force`, etc.) from the scanner host are **never suppressed** — if the scan machine has real malicious traffic, it still gets flagged.
+- Suppressed alerts are preserved in the report under **Authorized / Suppressed Activity** for full audit trail.
+
+| Alert type | From scanner host | From other host |
+|---|---|---|
+| Port Scan | Suppressed → Informational | Active → High/Medium |
+| Beaconing / C2 | **Active → Critical** | Active → Critical |
+| Data Exfiltration | **Active → High/Critical** | Active → High/Critical |
+
+```bash
+# Default: scanner suppression ON
+sudo python3 main.py full
+
+# Disable suppression (include self-generated Nmap alerts in scoring)
+sudo python3 main.py full --include-self-alerts
 ```
 
 ---

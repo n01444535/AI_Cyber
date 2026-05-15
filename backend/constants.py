@@ -181,6 +181,10 @@ REPORT_MAX_TOP_STORIES = 10
 REPORT_MAX_ALERTS = 100
 SCRIPT_OUTPUT_MAX_LENGTH = 140
 
+# ── Scanner context / false positive suppression ──────────────────────────────
+
+SCANNER_GRACE_PERIOD_SECONDS = 60
+
 # ── Uncommon port boundary ─────────────────────────────────────────────────────
 
 UNCOMMON_PORT_MIN = 1024

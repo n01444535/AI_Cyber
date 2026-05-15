@@ -178,10 +178,15 @@ def run_analyze_files(nmap_xml_path: str | None, pcap_file_path: str | None, ena
     _run_combined_analysis(nmap_xml_path, pcap_file_path, enable_ioc)
 
 
-def _run_combined_analysis(nmap_xml_path: str, pcap_file_path: str, enable_ioc: bool) -> None:
+def _run_combined_analysis(
+    nmap_xml_path: str,
+    pcap_file_path: str,
+    enable_ioc: bool,
+    scanner_context=None,
+) -> None:
+    from backend.constants import IOC_LOOKUP_MAX_EXTERNAL_IPS
     from backend.correlation.engine import correlate_alerts_into_stories
     from backend.ml.anomaly_detector import HostAnomalyDetector, TrafficAnomalyDetector
-    from backend.constants import IOC_LOOKUP_MAX_EXTERNAL_IPS
     from backend.models import ScanSessionResult
     from backend.packet_analyzer.pcap_parser import parse_pcap_file
     from backend.packet_analyzer.traffic_analyzer import (
@@ -204,8 +209,21 @@ def _run_combined_analysis(nmap_xml_path: str, pcap_file_path: str, enable_ioc: 
     print(f"[+] PCAP: {len(packet_records)} packets.")
 
     network_flows = build_network_flows(packet_records)
-    threat_alerts = detect_threats_in_traffic(packet_records, network_flows)
-    print(f"[+] Threats detected: {len(threat_alerts)}.")
+    all_detected_alerts = detect_threats_in_traffic(packet_records, network_flows)
+    print(f"[+] Threats detected: {len(all_detected_alerts)}.")
+
+    active_threat_alerts = all_detected_alerts
+    suppressed_alerts = []
+    if scanner_context is not None:
+        from backend.context.suppression_engine import apply_scanner_suppression
+        active_threat_alerts, suppressed_alerts = apply_scanner_suppression(
+            all_detected_alerts, scanner_context
+        )
+        if suppressed_alerts:
+            print(
+                f"[*] Suppressed {len(suppressed_alerts)} scanner-generated alert(s) "
+                f"from risk scoring (source: {scanner_context.scanner_host_ip})."
+            )
 
     host_scan_features = convert_hosts_to_feature_dicts(scanned_hosts)
     traffic_features = extract_traffic_features_per_host(packet_records, network_flows)
@@ -226,11 +244,11 @@ def _run_combined_analysis(nmap_xml_path: str, pcap_file_path: str, enable_ioc: 
         ioc_results = ioc_service.lookup_indicators_in_bulk(external_ips[:IOC_LOOKUP_MAX_EXTERNAL_IPS])
 
     print("[*] Correlating attack stories...")
-    attack_stories = correlate_alerts_into_stories(threat_alerts)
+    attack_stories = correlate_alerts_into_stories(active_threat_alerts)
 
     host_profiles = calculate_host_risk_profiles(
         scanned_hosts=scanned_hosts,
-        threat_alerts=threat_alerts,
+        threat_alerts=active_threat_alerts,
         anomaly_results=all_anomaly_results,
         ioc_results=ioc_results,
         attack_stories=attack_stories,
@@ -244,14 +262,16 @@ def _run_combined_analysis(nmap_xml_path: str, pcap_file_path: str, enable_ioc: 
         session_id=str(uuid.uuid4())[:12],
         scan_timestamp=datetime.now(timezone.utc).isoformat(),
         scanned_hosts=scanned_hosts,
-        threat_alerts=threat_alerts,
+        threat_alerts=active_threat_alerts,
         host_risk_profiles=host_profiles,
         attack_stories=attack_stories,
         timeline_events=all_timeline_events,
         total_risk_score=max((p.risk_score for p in host_profiles), default=0.0),
-        executive_summary=_build_summary(host_profiles, threat_alerts, attack_stories),
+        executive_summary=_build_summary(host_profiles, active_threat_alerts, attack_stories),
         nmap_file_path=nmap_xml_path,
         pcap_file_path=pcap_file_path,
+        suppressed_alerts=suppressed_alerts,
+        scanner_host_ip=scanner_context.scanner_host_ip if scanner_context else "",
     )
 
     render_full_session_dashboard(session)
@@ -268,9 +288,12 @@ def run_full_autonomous(
     interface: str | None,
     duration: int,
     enable_ioc: bool,
+    ignore_scanner_source: bool = True,
 ) -> None:
+    import time
     from concurrent.futures import ThreadPoolExecutor
 
+    from backend.context.scanner_context import build_scanner_context
     from backend.packet_analyzer.live_capture import (
         capture_live_traffic,
         detect_default_interface,
@@ -288,6 +311,7 @@ def run_full_autonomous(
 
     xml_path: list[str] = [None]
     pcap_path: list[str] = [None]
+    scan_start_time = time.time()
 
     def do_nmap_scan() -> None:
         xml_path[0] = run_nmap_scan(resolved_target)
@@ -303,7 +327,17 @@ def run_full_autonomous(
         nmap_future.result()
         capture_future.result()
 
-    _run_combined_analysis(xml_path[0], pcap_path[0], enable_ioc)
+    scan_end_time = time.time()
+
+    scanner_context = None
+    if ignore_scanner_source:
+        scanner_context = build_scanner_context(
+            scan_start_time=scan_start_time,
+            scan_end_time=scan_end_time,
+        )
+        print(f"[*] Scanner suppression active — self-generated alerts from {scanner_context.scanner_host_ip} will be downgraded.")
+
+    _run_combined_analysis(xml_path[0], pcap_path[0], enable_ioc, scanner_context=scanner_context)
 
 
 def run_host_explanation(nmap_xml_path: str, target_ip: str) -> None:
@@ -661,6 +695,7 @@ _HELP_EPILOG = """
 examples:
   sudo python3 main.py full
   sudo python3 main.py full --target xxx.xxx.x.x/24 --interface en0 --duration 120 --ioc
+  sudo python3 main.py full --include-self-alerts          # disable scanner false-positive suppression
   python3 main.py analyze --nmap samples/nmap/sample_scan.xml --pcap samples/pcaps/capture.pcap
   python3 main.py analyze --nmap samples/nmap/sample_scan.xml --ioc
   python3 main.py analyze --pcap samples/pcaps/capture.pcap
@@ -707,6 +742,12 @@ def build_argument_parser() -> argparse.ArgumentParser:
         help="Packet capture duration in seconds (default: 60)",
     )
     full_parser.add_argument("--ioc", action="store_true", help="Enable IOC threat intel lookups")
+    full_parser.add_argument(
+        "--include-self-alerts",
+        action="store_true",
+        dest="include_self_alerts",
+        help="Include self-generated Nmap traffic in threat scoring (disables scanner suppression)",
+    )
 
     analyze_parser = subparsers.add_parser(
         "analyze", help="File-based analysis: Nmap XML and/or PCAP"
@@ -766,6 +807,7 @@ def main() -> None:
             interface=args.interface,
             duration=args.duration,
             enable_ioc=args.ioc,
+            ignore_scanner_source=not args.include_self_alerts,
         )
     elif args.command == "analyze":
         if not args.nmap and not args.pcap:

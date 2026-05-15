@@ -138,6 +138,11 @@ class ThreatAlertRecord:
     last_seen: str = ""
     packet_count: int = 0
     flow_count: int = 0
+    # Suppression fields — set by suppression_engine when alert is scanner-generated
+    is_suppressed: bool = False
+    suppressed_from_risk_score: bool = False
+    false_positive_reason: str = ""
+    original_risk_level: Optional[RiskLevel] = None
 
 
 @dataclass
@@ -241,3 +246,5 @@ class ScanSessionResult:
     executive_summary: str = ""
     pcap_file_path: Optional[str] = None
     nmap_file_path: Optional[str] = None
+    suppressed_alerts: list[ThreatAlertRecord] = field(default_factory=list)
+    scanner_host_ip: str = ""
