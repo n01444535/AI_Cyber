@@ -33,6 +33,7 @@ def _save_session_to_db(session, report_paths: dict) -> None:
 
 
 def run_nmap_analysis(nmap_xml_path: str, enable_ioc: bool) -> None:
+    from backend.constants import IOC_LOOKUP_MAX_EXTERNAL_IPS
     from backend.correlation.engine import correlate_alerts_into_stories
     from backend.ml.anomaly_detector import HostAnomalyDetector
     from backend.models import ScanSessionResult
@@ -62,7 +63,7 @@ def run_nmap_analysis(nmap_xml_path: str, enable_ioc: bool) -> None:
         print("[*] Running IOC lookups (this may take a moment)...")
         ioc_service = IOCLookupService()
         external_ips = extract_unique_external_ips(host_feature_dicts)
-        ioc_results = ioc_service.lookup_indicators_in_bulk(external_ips[:20])
+        ioc_results = ioc_service.lookup_indicators_in_bulk(external_ips[:IOC_LOOKUP_MAX_EXTERNAL_IPS])
         malicious_count = sum(1 for r in ioc_results if r.is_malicious)
         print(f"[+] IOC lookup complete. {malicious_count} malicious indicators found.")
 
@@ -180,6 +181,7 @@ def run_analyze_files(nmap_xml_path: str | None, pcap_file_path: str | None, ena
 def _run_combined_analysis(nmap_xml_path: str, pcap_file_path: str, enable_ioc: bool) -> None:
     from backend.correlation.engine import correlate_alerts_into_stories
     from backend.ml.anomaly_detector import HostAnomalyDetector, TrafficAnomalyDetector
+    from backend.constants import IOC_LOOKUP_MAX_EXTERNAL_IPS
     from backend.models import ScanSessionResult
     from backend.packet_analyzer.pcap_parser import parse_pcap_file
     from backend.packet_analyzer.traffic_analyzer import (
@@ -221,7 +223,7 @@ def _run_combined_analysis(nmap_xml_path: str, pcap_file_path: str, enable_ioc: 
         print("[*] Running IOC lookups...")
         ioc_service = IOCLookupService()
         external_ips = extract_unique_external_ips(traffic_features)
-        ioc_results = ioc_service.lookup_indicators_in_bulk(external_ips[:20])
+        ioc_results = ioc_service.lookup_indicators_in_bulk(external_ips[:IOC_LOOKUP_MAX_EXTERNAL_IPS])
 
     print("[*] Correlating attack stories...")
     attack_stories = correlate_alerts_into_stories(threat_alerts)
@@ -565,6 +567,7 @@ def run_compare_command(pcap_path: str, baseline_path: str) -> None:
 
 
 def run_history_command(limit: int) -> None:
+    from backend.constants import RISK_SCORE_CRITICAL_MIN, RISK_SCORE_HIGH_MIN, RISK_SCORE_MEDIUM_MIN
     from backend.database import SessionRepository
     from rich import box
     from rich.console import Console
@@ -597,11 +600,11 @@ def run_history_command(limit: int) -> None:
 
     for session_row in session_summaries:
         risk_score = session_row["total_risk_score"]
-        if risk_score >= 80:
+        if risk_score >= RISK_SCORE_CRITICAL_MIN:
             score_display = f"[bold red]{risk_score:.0f}[/bold red]"
-        elif risk_score >= 60:
+        elif risk_score >= RISK_SCORE_HIGH_MIN:
             score_display = f"[bold orange3]{risk_score:.0f}[/bold orange3]"
-        elif risk_score >= 40:
+        elif risk_score >= RISK_SCORE_MEDIUM_MIN:
             score_display = f"[bold yellow]{risk_score:.0f}[/bold yellow]"
         else:
             score_display = f"[bold green]{risk_score:.0f}[/bold green]"

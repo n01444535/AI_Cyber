@@ -1,8 +1,9 @@
 import json
 import os
-from datetime import datetime, timezone
+from datetime import datetime
 from pathlib import Path
 
+from backend.constants import REPORT_MAX_ALERTS, REPORT_MAX_TOP_HOSTS, REPORT_MAX_TOP_STORIES
 from backend.models import (
     CorrelatedAttackStory,
     HostRiskProfile,
@@ -21,7 +22,7 @@ RISK_LEVEL_PRIORITY = {
 
 def generate_report(session_result: ScanSessionResult, output_directory: str) -> dict[str, str]:
     Path(output_directory).mkdir(parents=True, exist_ok=True)
-    timestamp_string = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    timestamp_string = datetime.now().strftime("%Y_%m_%d_%H_%M_%S")
     base_filename = f"cyber_report_{timestamp_string}"
 
     json_file_path = os.path.join(output_directory, f"{base_filename}.json")
@@ -46,7 +47,7 @@ def _build_report_data_dict(session: ScanSessionResult) -> dict:
     return {
         "report_metadata": {
             "report_id": session.session_id,
-            "generated_at": datetime.now(timezone.utc).isoformat(),
+            "generated_at": datetime.now().isoformat(),
             "scan_timestamp": session.scan_timestamp,
             "platform": "AI Cyber Fusion Platform v1.0",
         },
@@ -60,15 +61,15 @@ def _build_report_data_dict(session: ScanSessionResult) -> dict:
             "summary_text": session.executive_summary,
         },
         "top_risk_hosts": [
-            _serialize_host_profile(profile) for profile in session.host_risk_profiles[:10]
+            _serialize_host_profile(profile) for profile in session.host_risk_profiles[:REPORT_MAX_TOP_HOSTS]
         ],
         "threat_alerts": [
             _serialize_alert(alert)
             for alert in sorted(
                 session.threat_alerts, key=lambda a: RISK_LEVEL_PRIORITY.get(a.risk_level, 3)
-            )[:50]
+            )[:REPORT_MAX_ALERTS]
         ],
-        "attack_stories": [_serialize_attack_story(story) for story in session.attack_stories[:10]],
+        "attack_stories": [_serialize_attack_story(story) for story in session.attack_stories[:REPORT_MAX_TOP_STORIES]],
         "attack_timeline": [
             {
                 "event_time": event.event_time,
@@ -396,7 +397,7 @@ def _render_html_report(report_data: dict, session: ScanSessionResult) -> str:
 <div class="header">
   <h1>&#x1F6E1; AI Cyber Fusion Platform &mdash; Security Report</h1>
   <div class="subtitle">
-    Generated: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}
+    Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
     &nbsp;&nbsp;|&nbsp;&nbsp;
     Report ID: {report_data['report_metadata']['report_id']}
   </div>
